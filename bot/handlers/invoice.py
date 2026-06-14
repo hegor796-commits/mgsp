@@ -190,6 +190,85 @@ async def handle_download_pdf(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(f"Ошибка генерации PDF отчета: {e}")
 
 
+@router.callback_query(F.data == "add_items_to_db")
+async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, user: dict):
+    await callback.answer()
+    await callback.message.answer("Добавляю позиции в базу данных, подождите...")
+
+    from bot.main import db
+
+    data = await state.get_data()
+    invoice_data = data.get("invoice_data", {})
+    items = invoice_data.get("items", [])
+
+    if not items:
+        await callback.message.answer("Нет позиций для добавления.")
+        return
+
+    supplier = invoice_data.get("supplier") or ""
+    invoice_num = invoice_data.get("invoice_number") or ""
+    invoice_date = invoice_data.get("invoice_date") or ""
+
+    added = 0
+    updated = 0
+    skipped = 0
+
+    for item in items:
+        raw_name = item.get("name", "").strip()
+        if not raw_name:
+            continue
+
+        price = item.get("price_no_vat") or item.get("price_with_vat")
+        unit = item.get("unit") or "шт"
+
+        # Normalize name via AI
+        characteristics = {k: v for k, v in item.items()
+                           if k not in ("name", "unit", "quantity", "price_no_vat",
+                                        "price_with_vat", "amount") and v}
+        normalized = ai_extractor.normalize_name(raw_name, characteristics)
+
+        existing = db.get_material(normalized)
+
+        if existing is None:
+            db.add_material({
+                "Нормализованное наименование": normalized,
+                "Единица измерения": unit,
+                "Минимальная цена без НДС": price,
+                "Поставщик минимальной цены": supplier,
+            })
+            if price:
+                material_id = db.get_material(normalized).get("ID")
+                db.add_price_history({
+                    "ID материала": material_id,
+                    "Цена без НДС": price,
+                    "Поставщик": supplier,
+                    "Номер счета": invoice_num,
+                    "Дата счета": invoice_date,
+                    "Пользователь": str(callback.from_user.id),
+                })
+            added += 1
+        else:
+            existing_price = existing.get("Минимальная цена без НДС")
+            if price and (existing_price is None or float(price) < float(existing_price)):
+                db.update_min_price(
+                    existing["ID"], float(price), supplier,
+                    invoice_num, invoice_date, callback.from_user.id
+                )
+                updated += 1
+            else:
+                skipped += 1
+
+    db.log_action(callback.from_user.id, "Добавление позиций из счета",
+                  f"Счет №{invoice_num}: добавлено {added}, обновлено {updated}, пропущено {skipped}")
+
+    await callback.message.answer(
+        f"Готово\n\n"
+        f"✅ Новых позиций добавлено: {added}\n"
+        f"🔄 Цена обновлена (нашли дешевле): {updated}\n"
+        f"⏭ Пропущено (цена выше имеющейся): {skipped}"
+    )
+
+
 @router.message(F.text == "❌ Отмена")
 async def handle_cancel(message: Message, state: FSMContext, user: dict):
     await state.clear()
