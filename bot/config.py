@@ -10,11 +10,11 @@ class Settings:
     EXCEL_DB_PATH: str = os.getenv("EXCEL_DB_PATH", "data/database.xlsx")
     STORAGE_PATH: str = os.getenv("STORAGE_PATH", "storage/")
 
-    def __post_init__(self):
+    def validate(self):
         if not self.BOT_TOKEN:
-            raise ValueError("BOT_TOKEN is not set")
+            raise ValueError("BOT_TOKEN не задан в переменных окружения")
         if not self.ANTHROPIC_API_KEY:
-            raise ValueError("ANTHROPIC_API_KEY is not set")
+            raise ValueError("ANTHROPIC_API_KEY не задан в переменных окружения")
 
 
 settings = Settings()

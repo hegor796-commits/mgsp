@@ -11,14 +11,14 @@ def main_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="❓ Помощь")],
     ]
 
-    if role in ("снабженец", "admin"):
+    if role in ("снабженец", "Снабженец", "supply", "admin"):
         base_buttons.insert(2, [
             KeyboardButton(text="✅ Проверить счет"),
             KeyboardButton(text="📊 Выгрузить отчет"),
         ])
         base_buttons.insert(3, [KeyboardButton(text="➕ Добавить данные в базу знаний")])
 
-    if role == "admin":
+    if role in ("admin", "администратор"):
         base_buttons.append([KeyboardButton(text="⚙️ Администрирование")])
 
     return ReplyKeyboardMarkup(keyboard=base_buttons, resize_keyboard=True)
@@ -27,8 +27,8 @@ def main_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
 def report_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📊 Скачать Excel", callback_data="download_excel"),
-            InlineKeyboardButton(text="📄 Скачать PDF", callback_data="download_pdf"),
+            InlineKeyboardButton(text="📊 Скачать Excel", callback_data="report_excel"),
+            InlineKeyboardButton(text="📄 Скачать PDF", callback_data="report_pdf"),
         ]
     ])
 
@@ -65,12 +65,4 @@ def period_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Неделя", callback_data="period_week"),
             InlineKeyboardButton(text="Месяц", callback_data="period_month"),
         ]
-    ])
-
-
-def admin_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 Добавить пользователя", callback_data="admin_add_user")],
-        [InlineKeyboardButton(text="📦 Добавить материал", callback_data="admin_add_material")],
-        [InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_list_users")],
     ])

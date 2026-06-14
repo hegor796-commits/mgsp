@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import Optional
 import openpyxl
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 
 class ExcelDatabase:
@@ -11,68 +11,47 @@ class ExcelDatabase:
         self.db_path = db_path
 
     def init_db(self):
-        """Create xlsx with all required sheets if not exists."""
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         if os.path.exists(self.db_path):
             return
 
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         wb = Workbook()
-
-        # Remove default sheet
-        default_sheet = wb.active
-        wb.remove(default_sheet)
+        wb.remove(wb.active)
 
         # Материалы
         ws = wb.create_sheet("Материалы")
-        ws.append([
-            "ID", "Нормализованное наименование", "Единица измерения",
-            "Минимальная цена без НДС", "Поставщик минимальной цены",
-            "Дата последнего обновления", "Категория", "Активен"
-        ])
-        self._bold_header(ws)
+        ws.append(["ID", "Нормализованное наименование", "Единица измерения",
+                   "Минимальная цена без НДС", "Поставщик минимальной цены",
+                   "Дата последнего обновления", "Категория", "Активен"])
 
         # История цен
-        ws = wb.create_sheet("История цен")
-        ws.append([
-            "ID", "ID материала", "Цена без НДС", "Цена с НДС",
-            "Поставщик", "Номер счета", "Дата счета", "Дата добавления", "Пользователь"
-        ])
-        self._bold_header(ws)
+        ws2 = wb.create_sheet("История цен")
+        ws2.append(["ID", "ID материала", "Цена без НДС", "Цена с НДС",
+                    "Поставщик", "Номер счета", "Дата счета", "Дата добавления", "Пользователь"])
 
         # Аналоги
-        ws = wb.create_sheet("Аналоги")
-        ws.append(["ID", "ID материала", "ID аналога", "Коэффициент замены", "Примечание"])
-        self._bold_header(ws)
+        ws3 = wb.create_sheet("Аналоги")
+        ws3.append(["ID", "ID материала", "ID аналога", "Коэффициент замены", "Примечание"])
 
         # Поставщики
-        ws = wb.create_sheet("Поставщики")
-        ws.append(["ID", "Наименование", "ИНН", "Контакт", "Email", "Телефон", "Рейтинг"])
-        self._bold_header(ws)
+        ws4 = wb.create_sheet("Поставщики")
+        ws4.append(["ID", "Наименование", "ИНН", "Контакт", "Email", "Телефон", "Рейтинг"])
 
         # Пользователи
-        ws = wb.create_sheet("Пользователи")
-        ws.append(["Telegram ID", "ФИО", "Роль", "Email", "Активен", "Дата добавления"])
-        self._bold_header(ws)
-        ws.append([0, "Администратор", "admin", "", "Да", str(date.today())])
+        ws5 = wb.create_sheet("Пользователи")
+        ws5.append(["Telegram ID", "ФИО", "Роль", "Email", "Активен", "Дата добавления"])
+        ws5.append([0, "Администратор", "admin", "", "Да", date.today().strftime("%Y-%m-%d")])
 
         # Проверки счетов
-        ws = wb.create_sheet("Проверки счетов")
-        ws.append([
-            "ID", "Номер счета", "Дата счета", "Поставщик", "Сумма",
-            "НДС", "Валюта", "Дата проверки", "Пользователь", "Статус", "Потенциальная экономия"
-        ])
-        self._bold_header(ws)
+        ws6 = wb.create_sheet("Проверки счетов")
+        ws6.append(["ID", "Номер счета", "Дата счета", "Поставщик", "Сумма", "НДС",
+                    "Валюта", "Дата проверки", "Пользователь", "Статус", "Потенциальная экономия"])
 
         # Журнал
-        ws = wb.create_sheet("Журнал")
-        ws.append(["ID", "Дата", "Пользователь (Telegram ID)", "Действие", "Детали"])
-        self._bold_header(ws)
+        ws7 = wb.create_sheet("Журнал")
+        ws7.append(["ID", "Дата", "Пользователь (Telegram ID)", "Действие", "Детали"])
 
         wb.save(self.db_path)
-
-    def _bold_header(self, ws):
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
 
     def _load_wb(self):
         return load_workbook(self.db_path)
@@ -80,31 +59,20 @@ class ExcelDatabase:
     def _save_wb(self, wb):
         wb.save(self.db_path)
 
-    def _sheet_to_dicts(self, ws) -> list:
-        headers = [cell.value for cell in ws[1]]
-        result = []
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            if all(v is None for v in row):
-                continue
-            result.append(dict(zip(headers, row)))
-        return result
-
-    def _next_id(self, ws) -> int:
-        max_id = 0
-        for row in ws.iter_rows(min_row=2, min_col=1, max_col=1, values_only=True):
-            val = row[0]
-            if isinstance(val, (int, float)) and val > max_id:
-                max_id = int(val)
-        return max_id + 1
-
     def get_user(self, telegram_id) -> Optional[dict]:
         try:
             wb = self._load_wb()
             ws = wb["Пользователи"]
-            headers = [cell.value for cell in ws[1]]
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if row[0] is not None and str(row[0]) == str(telegram_id):
-                    return dict(zip(headers, row))
+                    return {
+                        "telegram_id": row[0],
+                        "name": row[1],
+                        "role": row[2],
+                        "email": row[3],
+                        "active": row[4],
+                        "date_added": row[5],
+                    }
             return None
         except Exception:
             return None
@@ -113,26 +81,43 @@ class ExcelDatabase:
         try:
             wb = self._load_wb()
             ws = wb["Материалы"]
-            headers = [cell.value for cell in ws[1]]
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[1] and str(row[1]).lower() == normalized_name.lower():
-                    return dict(zip(headers, row))
+                if row[1] and row[1].lower() == normalized_name.lower():
+                    return {
+                        "id": row[0],
+                        "name": row[1],
+                        "unit": row[2],
+                        "min_price": row[3],
+                        "min_price_supplier": row[4],
+                        "last_updated": row[5],
+                        "category": row[6],
+                        "active": row[7],
+                    }
             return None
         except Exception:
             return None
 
     def search_materials(self, query: str) -> list:
+        results = []
         try:
             wb = self._load_wb()
             ws = wb["Материалы"]
-            headers = [cell.value for cell in ws[1]]
-            result = []
+            query_lower = query.lower()
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[1] and query.lower() in str(row[1]).lower():
-                    result.append(dict(zip(headers, row)))
-            return result
+                if row[1] and query_lower in row[1].lower():
+                    results.append({
+                        "id": row[0],
+                        "name": row[1],
+                        "unit": row[2],
+                        "min_price": row[3],
+                        "min_price_supplier": row[4],
+                        "last_updated": row[5],
+                        "category": row[6],
+                        "active": row[7],
+                    })
         except Exception:
-            return []
+            pass
+        return results
 
     def get_min_price(self, material_id) -> Optional[float]:
         try:
@@ -140,66 +125,76 @@ class ExcelDatabase:
             ws = wb["Материалы"]
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if str(row[0]) == str(material_id):
-                    val = row[3]
-                    return float(val) if val is not None else None
+                    return float(row[3]) if row[3] is not None else None
             return None
         except Exception:
             return None
 
     def get_analogs(self, material_id) -> list:
+        results = []
         try:
             wb = self._load_wb()
             ws = wb["Аналоги"]
-            headers = [cell.value for cell in ws[1]]
-            result = []
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if str(row[1]) == str(material_id):
-                    result.append(dict(zip(headers, row)))
-            return result
+                    results.append({
+                        "id": row[0],
+                        "material_id": row[1],
+                        "analog_id": row[2],
+                        "coefficient": row[3],
+                        "note": row[4],
+                    })
         except Exception:
-            return []
+            pass
+        return results
 
     def add_material(self, data: dict) -> str:
         try:
             wb = self._load_wb()
             ws = wb["Материалы"]
-            new_id = self._next_id(ws)
+            # Generate new ID
+            max_id = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0] is not None:
+                    try:
+                        max_id = max(max_id, int(row[0]))
+                    except (ValueError, TypeError):
+                        pass
+            new_id = max_id + 1
             ws.append([
                 new_id,
-                data.get("Нормализованное наименование", ""),
-                data.get("Единица измерения", ""),
-                data.get("Минимальная цена без НДС", None),
-                data.get("Поставщик минимальной цены", ""),
-                data.get("Дата последнего обновления", str(date.today())),
-                data.get("Категория", ""),
-                data.get("Активен", "Да"),
+                data.get("name", ""),
+                data.get("unit", ""),
+                data.get("min_price", None),
+                data.get("min_price_supplier", ""),
+                data.get("last_updated", date.today().strftime("%Y-%m-%d")),
+                data.get("category", ""),
+                data.get("active", "Да"),
             ])
             self._save_wb(wb)
             return str(new_id)
         except Exception as e:
             raise RuntimeError(f"Ошибка добавления материала: {e}")
 
-    def update_min_price(self, material_id, price: float, supplier: str,
-                          invoice_num: str, invoice_date: str, user):
+    def update_min_price(self, material_id, price, supplier, invoice_num, invoice_date, user):
         try:
             wb = self._load_wb()
             ws = wb["Материалы"]
             for row in ws.iter_rows(min_row=2):
                 if str(row[0].value) == str(material_id):
-                    current = row[3].value
-                    if current is None or float(price) < float(current):
-                        row[3].value = price
-                        row[4].value = supplier
-                        row[5].value = str(date.today())
-                        break
+                    row[3].value = price
+                    row[4].value = supplier
+                    row[5].value = date.today().strftime("%Y-%m-%d")
+                    break
             self._save_wb(wb)
             self.add_price_history({
-                "ID материала": material_id,
-                "Цена без НДС": price,
-                "Поставщик": supplier,
-                "Номер счета": invoice_num,
-                "Дата счета": invoice_date,
-                "Пользователь": str(user),
+                "material_id": material_id,
+                "price_no_vat": price,
+                "price_with_vat": None,
+                "supplier": supplier,
+                "invoice_num": invoice_num,
+                "invoice_date": invoice_date,
+                "user": user,
             })
         except Exception as e:
             raise RuntimeError(f"Ошибка обновления цены: {e}")
@@ -208,17 +203,24 @@ class ExcelDatabase:
         try:
             wb = self._load_wb()
             ws = wb["История цен"]
-            new_id = self._next_id(ws)
+            max_id = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0] is not None:
+                    try:
+                        max_id = max(max_id, int(row[0]))
+                    except (ValueError, TypeError):
+                        pass
+            new_id = max_id + 1
             ws.append([
                 new_id,
-                data.get("ID материала", ""),
-                data.get("Цена без НДС", None),
-                data.get("Цена с НДС", None),
-                data.get("Поставщик", ""),
-                data.get("Номер счета", ""),
-                data.get("Дата счета", ""),
-                str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                data.get("Пользователь", ""),
+                data.get("material_id"),
+                data.get("price_no_vat"),
+                data.get("price_with_vat"),
+                data.get("supplier", ""),
+                data.get("invoice_num", ""),
+                data.get("invoice_date", ""),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                data.get("user", ""),
             ])
             self._save_wb(wb)
         except Exception as e:
@@ -228,60 +230,71 @@ class ExcelDatabase:
         try:
             wb = self._load_wb()
             ws = wb["Проверки счетов"]
-            new_id = self._next_id(ws)
+            max_id = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0] is not None:
+                    try:
+                        max_id = max(max_id, int(row[0]))
+                    except (ValueError, TypeError):
+                        pass
+            new_id = max_id + 1
             ws.append([
                 new_id,
-                data.get("Номер счета", ""),
-                data.get("Дата счета", ""),
-                data.get("Поставщик", ""),
-                data.get("Сумма", None),
-                data.get("НДС", None),
-                data.get("Валюта", "RUB"),
-                str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                data.get("Пользователь", ""),
-                data.get("Статус", ""),
-                data.get("Потенциальная экономия", None),
+                data.get("invoice_number", ""),
+                data.get("invoice_date", ""),
+                data.get("supplier", ""),
+                data.get("total_amount"),
+                data.get("vat_amount"),
+                data.get("currency", "RUB"),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                data.get("user", ""),
+                data.get("status", ""),
+                data.get("potential_savings"),
             ])
             self._save_wb(wb)
         except Exception as e:
-            raise RuntimeError(f"Ошибка сохранения проверки счета: {e}")
+            raise RuntimeError(f"Ошибка добавления проверки счета: {e}")
 
     def get_all_materials(self) -> list:
+        results = []
         try:
             wb = self._load_wb()
             ws = wb["Материалы"]
-            return self._sheet_to_dicts(ws)
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0] is not None:
+                    results.append({
+                        "id": row[0],
+                        "name": row[1],
+                        "unit": row[2],
+                        "min_price": row[3],
+                        "min_price_supplier": row[4],
+                        "last_updated": row[5],
+                        "category": row[6],
+                        "active": row[7],
+                    })
         except Exception:
-            return []
+            pass
+        return results
 
     def log_action(self, telegram_id, action: str, details: str = ""):
         try:
             wb = self._load_wb()
             ws = wb["Журнал"]
-            new_id = self._next_id(ws)
+            max_id = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0] is not None:
+                    try:
+                        max_id = max(max_id, int(row[0]))
+                    except (ValueError, TypeError):
+                        pass
+            new_id = max_id + 1
             ws.append([
                 new_id,
-                str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                str(telegram_id),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                telegram_id,
                 action,
                 details,
             ])
             self._save_wb(wb)
         except Exception:
             pass
-
-    def add_user(self, telegram_id, name: str, role: str, email: str = ""):
-        try:
-            wb = self._load_wb()
-            ws = wb["Пользователи"]
-            ws.append([
-                telegram_id,
-                name,
-                role,
-                email,
-                "Да",
-                str(date.today()),
-            ])
-            self._save_wb(wb)
-        except Exception as e:
-            raise RuntimeError(f"Ошибка добавления пользователя: {e}")
