@@ -152,7 +152,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
         await state.clear()
 
 
-@router.callback_query(F.data == "download_excel")
+@router.callback_query(F.data == "report_excel")
 async def handle_download_excel(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Генерирую Excel отчет...")
     try:
@@ -173,7 +173,7 @@ async def handle_download_excel(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(f"Ошибка генерации Excel отчета: {e}")
 
 
-@router.callback_query(F.data == "download_pdf")
+@router.callback_query(F.data == "report_pdf")
 async def handle_download_pdf(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Генерирую PDF отчет...")
     try:
