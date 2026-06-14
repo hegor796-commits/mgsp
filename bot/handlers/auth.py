@@ -1,6 +1,6 @@
 from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Message
+from aiogram.types import TelegramObject, Message, CallbackQuery
 
 
 class AuthMiddleware(BaseMiddleware):
@@ -14,30 +14,29 @@ class AuthMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        # Get telegram user from event
-        user = getattr(event, "from_user", None)
-        if user is None:
-            # Try to get from message inside callback query
-            if hasattr(event, "message") and event.message:
-                user = event.message.from_user
-        if user is None:
+        # Extract telegram user from any event type
+        if isinstance(event, Message):
+            tg_user = event.from_user
+        elif isinstance(event, CallbackQuery):
+            tg_user = event.from_user
+        else:
+            tg_user = getattr(event, "from_user", None)
+
+        if tg_user is None:
             return await handler(event, data)
 
-        telegram_id = user.id
-        db_user = self.db.get_user(telegram_id)
+        db_user = self.db.get_user(tg_user.id)
 
         if db_user is None:
-            # User not found - deny access
             if isinstance(event, Message):
                 await event.answer(
                     "У вас нет доступа к системе. Обратитесь к администратору."
                 )
-            elif hasattr(event, "message") and event.message:
-                await event.message.answer(
-                    "У вас нет доступа к системе. Обратитесь к администратору."
+            elif isinstance(event, CallbackQuery):
+                await event.answer(
+                    "У вас нет доступа к системе.", show_alert=True
                 )
-            return  # Stop propagation
+            return
 
-        # Attach user data to handler context
         data["user"] = db_user
         return await handler(event, data)

@@ -39,8 +39,9 @@ async def main():
     bot = Bot(token=settings.BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Register middleware
-    dp.update.middleware(AuthMiddleware(db))
+    # Register middleware only on message and callback_query
+    dp.message.middleware(AuthMiddleware(db))
+    dp.callback_query.middleware(AuthMiddleware(db))
 
     # /start and /help commands
     @dp.message(Command("start"))
