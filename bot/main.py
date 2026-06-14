@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -27,6 +28,13 @@ db = ExcelDatabase(settings.EXCEL_DB_PATH)
 async def main():
     logger.info("Инициализация базы данных...")
     db.init_db()
+
+    # Добавить начального администратора если его нет
+    admin_id = int(os.getenv("ADMIN_TELEGRAM_ID", "0"))
+    if admin_id and not db.get_user(admin_id):
+        admin_name = os.getenv("ADMIN_NAME", "Администратор")
+        db.add_user(admin_id, admin_name, "admin")
+        logger.info("Администратор добавлен: %s (%s)", admin_name, admin_id)
 
     bot = Bot(token=settings.BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
