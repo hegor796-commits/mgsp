@@ -34,11 +34,7 @@ async def handle_upload_invoice(message: Message, state: FSMContext):
 async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict):
     await message.answer("Файл получен. Обрабатываю, пожалуйста подождите...")
 
-    try:
-        db = message.bot["db"]
-    except Exception:
-        from bot.main import db as global_db
-        db = global_db
+    from bot.main import db
 
     try:
         # Determine file info

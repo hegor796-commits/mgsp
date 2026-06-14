@@ -31,9 +31,6 @@ async def main():
     bot = Bot(token=settings.BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Store db in bot context for handlers
-    bot["db"] = db
-
     # Register middleware
     dp.update.middleware(AuthMiddleware(db))
 
@@ -67,7 +64,7 @@ async def main():
 
     logger.info("Бот запущен. Начинаю polling...")
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), db=db)
     finally:
         await bot.session.close()
 
