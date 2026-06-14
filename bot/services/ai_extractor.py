@@ -1,7 +1,6 @@
 import json
 import re
-from typing import Optional
-import anthropic
+from openai import OpenAI
 
 
 SYSTEM_PROMPT = """Ты — специализированный ассистент для анализа счетов и накладных на русском языке.
@@ -13,38 +12,31 @@ SYSTEM_PROMPT = """Ты — специализированный ассисте�
 
 class AIExtractor:
     def __init__(self, api_key: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = "claude-sonnet-4-6"
+        self.client = OpenAI(api_key=api_key)
+        self.model = "gpt-4o"
 
-    def _call_claude(self, prompt: str, system: str = None) -> str:
-        """Call Claude API and return text response."""
-        try:
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=system or SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return message.content[0].text
-        except Exception as e:
-            raise RuntimeError(f"Ошибка вызова Claude API: {e}")
+    def _call_openai(self, prompt: str, system: str = None) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=4096,
+            messages=[
+                {"role": "system", "content": system or SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        return response.choices[0].message.content
 
     def _parse_json(self, text: str) -> dict:
-        """Extract and parse JSON from Claude response."""
-        # Try to find JSON block
         match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
         if match:
             text = match.group(1)
         else:
-            # Try to find raw JSON
             match = re.search(r"(\{[\s\S]+\})", text)
             if match:
                 text = match.group(1)
-
         return json.loads(text.strip())
 
     def extract_invoice(self, text: str) -> dict:
-        """Extract structured invoice data from text using Claude."""
         prompt = f"""Извлеки данные из следующего текста счета/накладной и верни их в формате JSON.
 
 Текст документа:
@@ -80,36 +72,27 @@ class AIExtractor:
 }}
 """
         try:
-            response = self._call_claude(prompt)
+            response = self._call_openai(prompt)
             return self._parse_json(response)
         except json.JSONDecodeError:
-            return {
-                "invoice_number": None,
-                "invoice_date": None,
-                "supplier": None,
-                "inn": None,
-                "total_amount": None,
-                "vat_amount": None,
-                "currency": "RUB",
-                "confidence": 0.0,
-                "items": [],
-            }
+            return self._empty_invoice()
         except Exception as e:
-            return {
-                "error": str(e),
-                "invoice_number": None,
-                "invoice_date": None,
-                "supplier": None,
-                "inn": None,
-                "total_amount": None,
-                "vat_amount": None,
-                "currency": "RUB",
-                "confidence": 0.0,
-                "items": [],
-            }
+            return {**self._empty_invoice(), "error": str(e)}
+
+    def _empty_invoice(self) -> dict:
+        return {
+            "invoice_number": None,
+            "invoice_date": None,
+            "supplier": None,
+            "inn": None,
+            "total_amount": None,
+            "vat_amount": None,
+            "currency": "RUB",
+            "confidence": 0.0,
+            "items": [],
+        }
 
     def normalize_name(self, name: str, characteristics: dict) -> str:
-        """Normalize material name by removing vendor-specific information."""
         char_str = ", ".join(f"{k}: {v}" for k, v in characteristics.items() if v)
         prompt = f"""Нормализуй наименование материала, убрав коммерческие и вендор-специфичные части,
 оставив только техническое описание для использования в базе данных.
@@ -118,14 +101,12 @@ class AIExtractor:
 Характеристики: {char_str}
 
 Верни JSON:
-{{
-  "normalized_name": "нормализованное наименование"
-}}
+{{"normalized_name": "нормализованное наименование"}}
 
 Пример: "Кабель ВВГнг-LS 3х2,5 ГОСТ (Камкабель)" -> "Кабель ВВГнг-LS 3х2,5 ГОСТ"
 """
         try:
-            response = self._call_claude(prompt)
+            response = self._call_openai(prompt)
             data = self._parse_json(response)
             return data.get("normalized_name", name)
         except Exception:
@@ -133,7 +114,6 @@ class AIExtractor:
 
     def find_analogs(self, material_name: str, characteristics: dict,
                      existing_materials: list) -> list:
-        """Find analogs for a material from existing materials list."""
         if not existing_materials:
             return []
 
@@ -166,7 +146,7 @@ class AIExtractor:
 Включи только реальные аналоги с similarity > 0.5. Если аналогов нет, верни пустой список.
 """
         try:
-            response = self._call_claude(prompt)
+            response = self._call_openai(prompt)
             data = self._parse_json(response)
             return data.get("analogs", [])
         except Exception:

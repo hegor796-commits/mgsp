@@ -157,7 +157,7 @@ async def handle_analog_search(message: Message, state: FSMContext, user: dict):
         # AI-based analog search
         all_materials = db.get_all_materials()
         if all_materials:
-            extractor = AIExtractor(settings.ANTHROPIC_API_KEY)
+            extractor = AIExtractor(settings.OPENAI_API_KEY)
             ai_analogs = extractor.find_analogs(query, {}, all_materials)
             if ai_analogs:
                 lines.append("\n🤖 Аналоги по мнению ИИ:")

@@ -14,7 +14,7 @@ from bot.services.price_checker import check_invoice, calculate_savings
 from bot.services.report_generator import generate_excel_report, generate_pdf_report
 
 router = Router()
-ai_extractor = AIExtractor(settings.ANTHROPIC_API_KEY)
+ai_extractor = AIExtractor(settings.OPENAI_API_KEY)
 
 
 class InvoiceStates(StatesGroup):
