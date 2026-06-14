@@ -1,0 +1,173 @@
+import json
+import re
+from typing import Optional
+import anthropic
+
+
+SYSTEM_PROMPT = """Ты — специализированный ассистент для анализа счетов и накладных на русском языке.
+Ты извлекаешь структурированные данные из текста финансовых документов.
+Всегда отвечай только в формате JSON без дополнительных пояснений.
+При неуверенности указывай null для соответствующих полей.
+"""
+
+
+class AIExtractor:
+    def __init__(self, api_key: str):
+        self.client = anthropic.Anthropic(api_key=api_key)
+        self.model = "claude-sonnet-4-6"
+
+    def _call_claude(self, prompt: str, system: str = None) -> str:
+        """Call Claude API and return text response."""
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                system=system or SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return message.content[0].text
+        except Exception as e:
+            raise RuntimeError(f"Ошибка вызова Claude API: {e}")
+
+    def _parse_json(self, text: str) -> dict:
+        """Extract and parse JSON from Claude response."""
+        # Try to find JSON block
+        match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
+        if match:
+            text = match.group(1)
+        else:
+            # Try to find raw JSON
+            match = re.search(r"(\{[\s\S]+\})", text)
+            if match:
+                text = match.group(1)
+
+        return json.loads(text.strip())
+
+    def extract_invoice(self, text: str) -> dict:
+        """Extract structured invoice data from text using Claude."""
+        prompt = f"""Извлеки данные из следующего текста счета/накладной и верни их в формате JSON.
+
+Текст документа:
+{text[:8000]}
+
+Верни JSON со следующей структурой:
+{{
+  "invoice_number": "номер счета или null",
+  "invoice_date": "дата в формате YYYY-MM-DD или null",
+  "supplier": "наименование поставщика или null",
+  "inn": "ИНН поставщика или null",
+  "total_amount": число или null,
+  "vat_amount": число или null,
+  "currency": "RUB или другая валюта",
+  "confidence": число от 0 до 1,
+  "items": [
+    {{
+      "name": "наименование товара",
+      "article": "артикул или null",
+      "brand": "бренд/производитель или null",
+      "color": "цвет или null",
+      "power": "мощность или null",
+      "diameter": "диаметр или null",
+      "thickness": "толщина или null",
+      "material_type": "тип материала или null",
+      "unit": "единица измерения",
+      "quantity": число или null,
+      "price_no_vat": цена без НДС или null,
+      "price_with_vat": цена с НДС или null,
+      "amount": сумма или null
+    }}
+  ]
+}}
+"""
+        try:
+            response = self._call_claude(prompt)
+            return self._parse_json(response)
+        except json.JSONDecodeError:
+            return {
+                "invoice_number": None,
+                "invoice_date": None,
+                "supplier": None,
+                "inn": None,
+                "total_amount": None,
+                "vat_amount": None,
+                "currency": "RUB",
+                "confidence": 0.0,
+                "items": [],
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "invoice_number": None,
+                "invoice_date": None,
+                "supplier": None,
+                "inn": None,
+                "total_amount": None,
+                "vat_amount": None,
+                "currency": "RUB",
+                "confidence": 0.0,
+                "items": [],
+            }
+
+    def normalize_name(self, name: str, characteristics: dict) -> str:
+        """Normalize material name by removing vendor-specific information."""
+        char_str = ", ".join(f"{k}: {v}" for k, v in characteristics.items() if v)
+        prompt = f"""Нормализуй наименование материала, убрав коммерческие и вендор-специфичные части,
+оставив только техническое описание для использования в базе данных.
+
+Наименование: {name}
+Характеристики: {char_str}
+
+Верни JSON:
+{{
+  "normalized_name": "нормализованное наименование"
+}}
+
+Пример: "Кабель ВВГнг-LS 3х2,5 ГОСТ (Камкабель)" -> "Кабель ВВГнг-LS 3х2,5 ГОСТ"
+"""
+        try:
+            response = self._call_claude(prompt)
+            data = self._parse_json(response)
+            return data.get("normalized_name", name)
+        except Exception:
+            return name
+
+    def find_analogs(self, material_name: str, characteristics: dict,
+                     existing_materials: list) -> list:
+        """Find analogs for a material from existing materials list."""
+        if not existing_materials:
+            return []
+
+        materials_list = "\n".join(
+            f"- {m.get('Нормализованное наименование', '')} (ID: {m.get('ID', '')})"
+            for m in existing_materials[:100]
+        )
+        char_str = ", ".join(f"{k}: {v}" for k, v in characteristics.items() if v)
+
+        prompt = f"""Найди аналоги для следующего материала из списка существующих материалов в базе.
+
+Искомый материал: {material_name}
+Характеристики: {char_str}
+
+Список существующих материалов:
+{materials_list}
+
+Верни JSON:
+{{
+  "analogs": [
+    {{
+      "material_name": "наименование аналога",
+      "material_id": "ID аналога",
+      "similarity": число от 0 до 1,
+      "comment": "пояснение почему это аналог"
+    }}
+  ]
+}}
+
+Включи только реальные аналоги с similarity > 0.5. Если аналогов нет, верни пустой список.
+"""
+        try:
+            response = self._call_claude(prompt)
+            data = self._parse_json(response)
+            return data.get("analogs", [])
+        except Exception:
+            return []
