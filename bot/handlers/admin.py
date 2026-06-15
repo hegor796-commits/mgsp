@@ -208,9 +208,27 @@ async def handle_list_users(callback: CallbackQuery, user: dict):
         await callback.message.answer(f"Ошибка получения списка пользователей: {e}")
 
 
+def can_dedup(user: dict) -> bool:
+    role = user.get("Роль", "") if user else ""
+    return role in ("admin", "снабженец", "Снабженец")
+
+
+@router.message(F.text == "🧹 Очистить дубликаты в базе")
+async def handle_dedup_text(message: Message, user: dict):
+    if not can_dedup(user):
+        await message.answer("У вас нет прав для выполнения этой операции.")
+        return
+    try:
+        from bot.main import db
+        removed = db.deduplicate_materials()
+        await message.answer(f"Готово. Удалено дублирующихся позиций: {removed}")
+    except Exception as e:
+        await message.answer(f"Ошибка при очистке дубликатов: {e}")
+
+
 @router.callback_query(F.data == "admin_dedup")
 async def handle_dedup(callback: CallbackQuery, user: dict):
-    if not is_admin(user):
+    if not can_dedup(user):
         await callback.answer("Нет прав доступа.", show_alert=True)
         return
     await callback.answer()

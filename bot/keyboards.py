@@ -17,6 +17,7 @@ def main_menu_keyboard(role: str) -> ReplyKeyboardMarkup:
             KeyboardButton(text="📊 Выгрузить отчет"),
         ])
         base_buttons.insert(3, [KeyboardButton(text="➕ Добавить данные в базу знаний")])
+        base_buttons.insert(4, [KeyboardButton(text="🧹 Очистить дубликаты в базе")])
 
     if role in ("admin", "администратор"):
         base_buttons.append([KeyboardButton(text="⚙️ Администрирование")])
