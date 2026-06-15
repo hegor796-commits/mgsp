@@ -99,8 +99,9 @@ class ExcelDatabase:
         try:
             wb = self._load_wb()
             ws = wb["Материалы"]
+            key = normalized_name.strip().lower()
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[1] and str(row[1]).lower() == normalized_name.lower():
+                if row[1] and str(row[1]).strip().lower() == key:
                     return _row_to_dict(MATERIAL_HEADERS, row)
             return None
         except Exception:
@@ -111,9 +112,9 @@ class ExcelDatabase:
         try:
             wb = self._load_wb()
             ws = wb["Материалы"]
-            q = query.lower()
+            q = query.strip().lower()
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[1] and q in str(row[1]).lower():
+                if row[1] and q in str(row[1]).strip().lower():
                     results.append(_row_to_dict(MATERIAL_HEADERS, row))
         except Exception:
             pass
@@ -160,7 +161,7 @@ class ExcelDatabase:
         new_id = self._next_id(ws)
         ws.append([
             new_id,
-            data.get("Нормализованное наименование", ""),
+            str(data.get("Нормализованное наименование", "")).strip().lower(),
             data.get("Единица измерения", ""),
             data.get("Минимальная цена без НДС"),
             data.get("Поставщик минимальной цены", ""),

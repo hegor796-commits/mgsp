@@ -148,7 +148,7 @@ class AIExtractor:
         try:
             response = self._call_openai(prompt)
             data = self._parse_json(response)
-            return data.get("normalized_name", name)
+            return data.get("normalized_name", name).strip().lower()
         except Exception:
             return name
 
