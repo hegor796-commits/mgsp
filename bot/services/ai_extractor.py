@@ -94,8 +94,15 @@ class AIExtractor:
 
     def normalize_name(self, name: str, characteristics: dict) -> str:
         char_str = ", ".join(f"{k}: {v}" for k, v in characteristics.items() if v)
-        prompt = f"""Нормализуй наименование материала, убрав коммерческие и вендор-специфичные части,
-оставив только техническое описание для использования в базе данных.
+        prompt = f"""Нормализуй наименование строительного материала для базы данных.
+
+Правила (строго соблюдай):
+1. Убери название бренда/производителя/поставщика в скобках или после запятой
+2. Убери артикул (обычно набор цифр и букв)
+3. НЕ сокращай слова — пиши полностью: "наружная" (не "наруж."), "соединительный" (не "соед.")
+4. Сохрани все технические характеристики: размер, диаметр, резьбу, марку материала, ГОСТ
+5. Первое слово — тип изделия (штуцер, кабель, труба, болт и т.д.)
+6. Используй строчные буквы, кроме аббревиатур (ГОСТ, ПВХ, ВВГнг и т.д.)
 
 Наименование: {name}
 Характеристики: {char_str}
@@ -103,7 +110,10 @@ class AIExtractor:
 Верни JSON:
 {{"normalized_name": "нормализованное наименование"}}
 
-Пример: "Кабель ВВГнг-LS 3х2,5 ГОСТ (Камкабель)" -> "Кабель ВВГнг-LS 3х2,5 ГОСТ"
+Примеры:
+"Штуцер пневм. наруж. резьба 1/2 ёлочка 6мм (Camozzi)" -> "штуцер пневматический наружная резьба 1/2 ёлочка 6 мм"
+"Кабель ВВГнг-LS 3х2,5 ГОСТ (Камкабель) арт.12345" -> "кабель ВВГнг-LS 3х2,5 ГОСТ"
+"Труба полипропиленовая d=32мм PN20" -> "труба полипропиленовая диаметр 32 мм PN20"
 """
         try:
             response = self._call_openai(prompt)
@@ -111,6 +121,26 @@ class AIExtractor:
             return data.get("normalized_name", name)
         except Exception:
             return name
+
+    def is_same_material(self, new_name: str, existing_name: str) -> bool:
+        """Ask AI whether two material names refer to the same physical item."""
+        prompt = f"""Определи, являются ли два наименования одним и тем же строительным материалом.
+
+Наименование 1: {new_name}
+Наименование 2: {existing_name}
+
+Считай их одинаковыми ТОЛЬКО если это абсолютно тот же товар с теми же характеристиками.
+Разные размеры, диаметры, резьбы, марки — это РАЗНЫЕ товары.
+
+Верни JSON:
+{{"same": true/false, "reason": "краткое пояснение"}}
+"""
+        try:
+            response = self._call_openai(prompt)
+            data = self._parse_json(response)
+            return bool(data.get("same", False))
+        except Exception:
+            return False
 
     def find_analogs(self, material_name: str, characteristics: dict,
                      existing_materials: list) -> list:

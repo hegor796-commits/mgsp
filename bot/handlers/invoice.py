@@ -99,7 +99,20 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             if key in seen_names:
                 continue  # duplicate within same invoice
             seen_names.add(key)
-            if not db.get_material(normalized):
+            # Exact match check
+            existing = db.get_material(normalized)
+            if existing is None:
+                # Fuzzy check: search by first meaningful word, then ask AI
+                first_word = normalized.split()[0] if normalized.split() else normalized
+                candidates = db.search_materials(first_word)
+                for candidate in candidates[:5]:
+                    cand_name = candidate.get("Нормализованное наименование", "")
+                    if ai_extractor.is_same_material(normalized, cand_name):
+                        existing = candidate
+                        item["name"] = cand_name  # point to existing record
+                        break
+
+            if existing is None:
                 db.add_material({
                     "Нормализованное наименование": normalized,
                     "Единица измерения": unit,
