@@ -1,9 +1,17 @@
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram import Router, F, Bot
+from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from bot.config import settings
 from bot.keyboards import main_menu_keyboard, admin_keyboard, cancel_keyboard
+from bot.services.ocr import detect_and_parse
+from bot.services.ai_extractor import AIExtractor
+
+import os
+import tempfile
+
+ai_extractor = AIExtractor(settings.OPENAI_API_KEY)
 
 router = Router()
 
@@ -15,9 +23,7 @@ class AddUserStates(StatesGroup):
 
 
 class AddMaterialStates(StatesGroup):
-    waiting_for_name = State()
-    waiting_for_unit = State()
-    waiting_for_category = State()
+    waiting_for_input = State()  # file or text describing material(s)
 
 
 def is_admin(user: dict) -> bool:
@@ -244,11 +250,104 @@ async def handle_dedup(callback: CallbackQuery, user: dict):
 
 @router.message(F.text == "➕ Добавить данные в базу знаний")
 async def handle_add_to_kb(message: Message, state: FSMContext, user: dict):
-    if not is_admin(user) and user.get("Роль") != "снабженец":
+    if not is_admin(user) and user.get("Роль") not in ("снабженец", "Снабженец"):
         await message.answer("У вас нет прав для выполнения этой операции.")
         return
-    await state.set_state(AddMaterialStates.waiting_for_name)
+    await state.set_state(AddMaterialStates.waiting_for_input)
     await message.answer(
-        "Введите нормализованное наименование материала для добавления в базу:",
+        "Отправьте файл (PDF, Excel, Word, фото) или напишите список материалов текстом.\n"
+        "ИИ сам извлечёт названия, единицы измерения и цены и добавит в базу.",
         reply_markup=cancel_keyboard()
+    )
+
+
+@router.message(AddMaterialStates.waiting_for_input, F.document | F.photo)
+async def handle_kb_file(message: Message, state: FSMContext, bot: Bot, user: dict):
+    from bot.main import db
+    await message.answer("Файл получен, обрабатываю...")
+    try:
+        if message.document:
+            file_id = message.document.file_id
+            file_name = message.document.file_name or "material_file"
+        else:
+            file_id = message.photo[-1].file_id
+            file_name = "material_photo.jpg"
+
+        os.makedirs(settings.STORAGE_PATH, exist_ok=True)
+        file_path = os.path.join(settings.STORAGE_PATH, file_name)
+        await bot.download(file_id, destination=file_path)
+
+        text = detect_and_parse(file_path)
+        if not text or len(text.strip()) < 5:
+            await message.answer("Не удалось извлечь текст из файла. Попробуйте другой формат.")
+            return
+
+        await _add_materials_from_text(message, state, db, text, user)
+    except Exception as e:
+        await message.answer(f"Ошибка при обработке файла: {e}")
+        await state.clear()
+
+
+@router.message(AddMaterialStates.waiting_for_input, F.text & ~F.text.startswith("❌"))
+async def handle_kb_text(message: Message, state: FSMContext, user: dict):
+    from bot.main import db
+    await message.answer("Анализирую текст...")
+    await _add_materials_from_text(message, state, db, message.text, user)
+
+
+async def _add_materials_from_text(message: Message, state: FSMContext, db, text: str, user: dict):
+    await message.answer("ИИ извлекает материалы из текста...")
+    extracted = ai_extractor.extract_materials_for_db(text)
+
+    if not extracted:
+        await message.answer("Не удалось найти материалы в тексте. Попробуйте другой формат.")
+        await state.clear()
+        role = user.get("Роль", "user") if user else "user"
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard(role))
+        return
+
+    added = 0
+    skipped = 0
+    seen: set[str] = set()
+
+    for mat in extracted:
+        name = (mat.get("name") or "").strip()
+        if not name:
+            continue
+        characteristics = {k: v for k, v in mat.items() if k != "name" and v}
+        normalized = ai_extractor.normalize_name(name, characteristics)
+        key = normalized.lower().strip()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        existing = db.get_material(normalized)
+        if existing is None:
+            first_word = normalized.split()[0] if normalized.split() else normalized
+            for candidate in db.search_materials(first_word)[:5]:
+                cand_name = candidate.get("Нормализованное наименование", "")
+                if ai_extractor.is_same_material(normalized, cand_name):
+                    existing = candidate
+                    break
+
+        if existing is None:
+            db.add_material({
+                "Нормализованное наименование": normalized,
+                "Единица измерения": mat.get("unit") or "шт",
+                "Минимальная цена без НДС": mat.get("price"),
+                "Поставщик минимальной цены": mat.get("supplier") or "",
+                "Категория": mat.get("category") or "",
+            })
+            added += 1
+        else:
+            skipped += 1
+
+    db.log_action(message.from_user.id, "Добавление материалов через ИИ",
+                  f"Добавлено: {added}, пропущено дублей: {skipped}")
+
+    await state.clear()
+    role = user.get("Роль", "user") if user else "user"
+    await message.answer(
+        f"Готово.\n\n✅ Добавлено новых материалов: {added}\n⏭ Пропущено (уже есть в базе): {skipped}",
+        reply_markup=main_menu_keyboard(role)
     )

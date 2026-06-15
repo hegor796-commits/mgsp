@@ -92,6 +92,36 @@ class AIExtractor:
             "items": [],
         }
 
+    def extract_materials_for_db(self, text: str) -> list:
+        """Extract a list of materials from arbitrary text (price list, catalog, invoice, etc.)"""
+        prompt = f"""Извлеки список строительных материалов из текста ниже.
+Для каждого материала верни его наименование, единицу измерения, цену (если есть) и категорию.
+
+Текст:
+{text[:8000]}
+
+Верни JSON:
+{{
+  "materials": [
+    {{
+      "name": "наименование материала",
+      "unit": "единица измерения (шт, м, м2, м3, кг, л, упак и т.д.)",
+      "price": цена числом без НДС или null,
+      "supplier": "поставщик если указан или null",
+      "category": "категория материала (кабели, трубы, крепёж и т.д.) или null"
+    }}
+  ]
+}}
+
+Включай только реальные материалы/товары. Не включай услуги, работы, НДС, итого.
+"""
+        try:
+            response = self._call_openai(prompt)
+            data = self._parse_json(response)
+            return data.get("materials", [])
+        except Exception:
+            return []
+
     def normalize_name(self, name: str, characteristics: dict) -> str:
         char_str = ", ".join(f"{k}: {v}" for k, v in characteristics.items() if v)
         prompt = f"""Нормализуй наименование строительного материала для базы данных.
