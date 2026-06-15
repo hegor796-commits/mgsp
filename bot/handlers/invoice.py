@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
@@ -12,6 +13,22 @@ from bot.services.ocr import detect_and_parse
 from bot.services.ai_extractor import AIExtractor
 from bot.services.price_checker import check_invoice, calculate_savings
 from bot.services.report_generator import generate_excel_report, generate_pdf_report
+
+
+def _save_invoice_cache(user_id: int, data: dict):
+    os.makedirs(settings.STORAGE_PATH, exist_ok=True)
+    path = os.path.join(settings.STORAGE_PATH, f"invoice_{user_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, default=str)
+
+
+def _load_invoice_cache(user_id: int) -> dict:
+    path = os.path.join(settings.STORAGE_PATH, f"invoice_{user_id}.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 router = Router()
 ai_extractor = AIExtractor(settings.OPENAI_API_KEY)
@@ -190,12 +207,17 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
         })
         db.log_action(telegram_id, "Проверка счета", f"Счет №{invoice_num}, экономия {total_savings}")
 
-        # Store results in FSM for report generation
+        # Store results in FSM and in file (survives bot restarts)
         await state.update_data(
             invoice_data=invoice_data,
             check_results=check_results,
             savings=savings,
         )
+        _save_invoice_cache(telegram_id, {
+            "invoice_data": invoice_data,
+            "check_results": check_results,
+            "savings": savings,
+        })
 
         role = user.get("Роль", "user") if user else "user"
         # Do NOT clear state here — report/update buttons still need FSM data
@@ -210,11 +232,18 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
         await state.clear()
 
 
+def _get_session_data(fsm_data: dict, user_id: int) -> dict:
+    """Return FSM data, falling back to file cache if FSM was wiped by restart."""
+    if fsm_data.get("invoice_data"):
+        return fsm_data
+    return _load_invoice_cache(user_id)
+
+
 @router.callback_query(F.data == "report_excel")
 async def handle_download_excel(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Генерирую Excel отчет...")
     try:
-        data = await state.get_data()
+        data = _get_session_data(await state.get_data(), callback.from_user.id)
         invoice_data = data.get("invoice_data", {})
         check_results = data.get("check_results", [])
         savings = data.get("savings", {})
@@ -235,7 +264,7 @@ async def handle_download_excel(callback: CallbackQuery, state: FSMContext):
 async def handle_download_pdf(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Генерирую PDF отчет...")
     try:
-        data = await state.get_data()
+        data = _get_session_data(await state.get_data(), callback.from_user.id)
         invoice_data = data.get("invoice_data", {})
         check_results = data.get("check_results", [])
         savings = data.get("savings", {})
@@ -259,12 +288,12 @@ async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, use
 
     from bot.main import db
 
-    data = await state.get_data()
+    data = _get_session_data(await state.get_data(), callback.from_user.id)
     invoice_data = data.get("invoice_data", {})
     items = invoice_data.get("items", [])
 
     if not items:
-        await callback.message.answer("Нет позиций для добавления.")
+        await callback.message.answer("Нет позиций для обновления — загрузите счёт заново.")
         return
 
     supplier = invoice_data.get("supplier") or ""
