@@ -82,6 +82,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
         invoice_num_raw = invoice_data.get("invoice_number") or ""
         invoice_date_raw = invoice_data.get("invoice_date") or ""
         auto_added = 0
+        seen_names: set[str] = set()  # deduplicate within this invoice
         for item in items:
             raw_name = item.get("name", "").strip()
             if not raw_name:
@@ -94,6 +95,10 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             normalized = ai_extractor.normalize_name(raw_name, characteristics)
             # Replace name with normalized so price_checker can find it in DB
             item["name"] = normalized
+            key = normalized.lower().strip()
+            if key in seen_names:
+                continue  # duplicate within same invoice
+            seen_names.add(key)
             if not db.get_material(normalized):
                 db.add_material({
                     "Нормализованное наименование": normalized,

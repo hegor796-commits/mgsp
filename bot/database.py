@@ -171,6 +171,35 @@ class ExcelDatabase:
         self._save_wb(wb)
         return str(new_id)
 
+    def deduplicate_materials(self) -> int:
+        """Remove duplicate materials (same normalized name), keep the one with lowest price."""
+        wb = self._load_wb()
+        ws = wb["Материалы"]
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        seen: dict[str, tuple] = {}  # name -> best row
+        for row in rows:
+            if not row[1]:
+                continue
+            key = str(row[1]).lower().strip()
+            if key not in seen:
+                seen[key] = row
+            else:
+                existing_price = seen[key][3]
+                current_price = row[3]
+                if current_price is not None:
+                    if existing_price is None or float(current_price) < float(existing_price):
+                        seen[key] = row
+        removed = len(rows) - len(seen)
+        if removed > 0:
+            for row in ws.iter_rows(min_row=2):
+                for cell in row:
+                    cell.value = None
+            for i, row_data in enumerate(seen.values(), start=2):
+                for j, val in enumerate(row_data, start=1):
+                    ws.cell(row=i, column=j, value=val)
+            self._save_wb(wb)
+        return removed
+
     def update_min_price(self, material_id, price: float, supplier: str,
                          invoice_num: str, invoice_date: str, user):
         wb = self._load_wb()

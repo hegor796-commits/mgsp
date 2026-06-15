@@ -208,6 +208,22 @@ async def handle_list_users(callback: CallbackQuery, user: dict):
         await callback.message.answer(f"Ошибка получения списка пользователей: {e}")
 
 
+@router.callback_query(F.data == "admin_dedup")
+async def handle_dedup(callback: CallbackQuery, user: dict):
+    if not is_admin(user):
+        await callback.answer("Нет прав доступа.", show_alert=True)
+        return
+    await callback.answer()
+    try:
+        from bot.main import db
+        removed = db.deduplicate_materials()
+        await callback.message.answer(
+            f"Готово. Удалено дублирующихся позиций: {removed}"
+        )
+    except Exception as e:
+        await callback.message.answer(f"Ошибка при очистке дубликатов: {e}")
+
+
 @router.message(F.text == "➕ Добавить данные в базу знаний")
 async def handle_add_to_kb(message: Message, state: FSMContext, user: dict):
     if not is_admin(user) and user.get("Роль") != "снабженец":
