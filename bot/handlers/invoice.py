@@ -76,8 +76,8 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             await state.clear()
             return
 
-        # Auto-add new items to DB before price check
-        await message.answer("Проверяю базу данных и добавляю новые позиции...")
+        # Normalize names via AI and auto-add new items to DB
+        await message.answer("Нормализую названия и проверяю базу данных...")
         supplier_raw = invoice_data.get("supplier") or ""
         invoice_num_raw = invoice_data.get("invoice_number") or ""
         invoice_date_raw = invoice_data.get("invoice_date") or ""
@@ -92,6 +92,8 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
                                if k not in ("name", "unit", "quantity", "price_no_vat",
                                             "price_with_vat", "amount") and v}
             normalized = ai_extractor.normalize_name(raw_name, characteristics)
+            # Replace name with normalized so price_checker can find it in DB
+            item["name"] = normalized
             if not db.get_material(normalized):
                 db.add_material({
                     "Нормализованное наименование": normalized,
@@ -112,7 +114,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
                         })
                 auto_added += 1
 
-        # Price check
+        # Price check (uses normalized names that are now in DB)
         await message.answer("Сверяю цены с базой данных...")
         check_results = check_invoice(items, db)
         savings = calculate_savings(check_results)
@@ -177,7 +179,10 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             savings=savings,
         )
 
-        await message.answer(summary, reply_markup=report_keyboard())
+        role = user.get("Роль", "user") if user else "user"
+        await state.clear()
+        await message.answer(summary, reply_markup=main_menu_keyboard(role))
+        await message.answer("Выберите действие для получения отчета:", reply_markup=report_keyboard())
 
     except Exception as e:
         await message.answer(
@@ -311,7 +316,6 @@ async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, use
 async def handle_cancel(message: Message, state: FSMContext, user: dict):
     await state.clear()
     role = user.get("Роль", "user") if user else "user"
-    from bot.keyboards import main_menu_keyboard
     await message.answer(
         "Действие отменено.",
         reply_markup=main_menu_keyboard(role)
