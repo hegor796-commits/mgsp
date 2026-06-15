@@ -120,60 +120,12 @@ async def handle_add_material_start(callback: CallbackQuery, state: FSMContext, 
         await callback.answer("Нет прав доступа.", show_alert=True)
         return
     await callback.answer()
-    await state.set_state(AddMaterialStates.waiting_for_name)
+    await state.set_state(AddMaterialStates.waiting_for_input)
     await callback.message.answer(
-        "Введите нормализованное наименование нового материала:",
+        "Отправьте файл (PDF, Excel, Word, фото) или напишите список материалов текстом.\n"
+        "ИИ сам извлечёт названия, единицы измерения и цены и добавит в базу.",
         reply_markup=cancel_keyboard()
     )
-
-
-@router.message(AddMaterialStates.waiting_for_name)
-async def handle_add_material_name(message: Message, state: FSMContext):
-    await state.update_data(mat_name=message.text.strip())
-    await state.set_state(AddMaterialStates.waiting_for_unit)
-    await message.answer("Введите единицу измерения (например: шт, м, кг, м²):")
-
-
-@router.message(AddMaterialStates.waiting_for_unit)
-async def handle_add_material_unit(message: Message, state: FSMContext):
-    await state.update_data(mat_unit=message.text.strip())
-    await state.set_state(AddMaterialStates.waiting_for_category)
-    await message.answer("Введите категорию материала (или оставьте пустым):")
-
-
-@router.message(AddMaterialStates.waiting_for_category)
-async def handle_add_material_category(message: Message, state: FSMContext, user: dict):
-    data = await state.get_data()
-    await state.clear()
-
-    mat_name = data.get("mat_name", "")
-    mat_unit = data.get("mat_unit", "")
-    mat_category = message.text.strip()
-
-    try:
-        from bot.main import db
-        mat_id = db.add_material({
-            "Нормализованное наименование": mat_name,
-            "Единица измерения": mat_unit,
-            "Категория": mat_category,
-            "Активен": "Да",
-        })
-        db.log_action(
-            message.from_user.id,
-            "Добавление материала",
-            f"Наименование: {mat_name}, ID: {mat_id}"
-        )
-        role = user.get("Роль", "admin") if user else "admin"
-        await message.answer(
-            f"✅ Материал добавлен в базу:\n"
-            f"ID: {mat_id}\n"
-            f"Наименование: {mat_name}\n"
-            f"Ед. изм.: {mat_unit}\n"
-            f"Категория: {mat_category or '—'}",
-            reply_markup=main_menu_keyboard(role)
-        )
-    except Exception as e:
-        await message.answer(f"Ошибка при добавлении материала: {e}")
 
 
 @router.callback_query(F.data == "admin_list_users")
