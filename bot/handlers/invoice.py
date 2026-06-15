@@ -134,7 +134,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
 
         # Price check (uses normalized names that are now in DB)
         await message.answer("Сверяю цены с базой данных...")
-        check_results = check_invoice(items, db)
+        check_results = check_invoice(items, db, ai_extractor)
         savings = calculate_savings(check_results)
 
         # Build summary message

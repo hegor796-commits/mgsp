@@ -1,7 +1,7 @@
 from typing import Optional
 
 
-def check_invoice(items: list, db) -> list:
+def check_invoice(items: list, db, ai_extractor=None) -> list:
     """
     Check each item in the invoice against the database.
     Returns list of dicts with item data + status, min_price, deviation_percent,
@@ -14,8 +14,18 @@ def check_invoice(items: list, db) -> list:
         price_no_vat = item.get("price_no_vat")
         quantity = item.get("quantity") or 1
 
-        # Search in DB
+        # Search in DB — first by substring
         found_materials = db.search_materials(name) if name else []
+
+        # If not found by substring, try AI similarity on candidates by first word
+        if not found_materials and ai_extractor and name:
+            first_word = name.split()[0] if name.split() else name
+            candidates = db.search_materials(first_word)
+            for candidate in candidates[:5]:
+                cand_name = candidate.get("Нормализованное наименование", "")
+                if ai_extractor.is_same_material(name, cand_name):
+                    found_materials = [candidate]
+                    break
 
         if not found_materials:
             results.append({
