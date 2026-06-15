@@ -198,7 +198,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
         )
 
         role = user.get("Роль", "user") if user else "user"
-        await state.clear()
+        # Do NOT clear state here — report/update buttons still need FSM data
         await message.answer(summary, reply_markup=main_menu_keyboard(role))
         await message.answer("Выберите действие для получения отчета:", reply_markup=report_keyboard())
 

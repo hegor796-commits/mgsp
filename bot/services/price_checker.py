@@ -14,10 +14,11 @@ def check_invoice(items: list, db, ai_extractor=None) -> list:
         price_no_vat = item.get("price_no_vat")
         quantity = item.get("quantity") or 1
 
-        # Search in DB — first by substring
-        found_materials = db.search_materials(name) if name else []
+        # Search in DB — exact match first, then substring, then AI similarity
+        exact = db.get_material(name) if name else None
+        found_materials = [exact] if exact else (db.search_materials(name) if name else [])
 
-        # If not found by substring, try AI similarity on candidates by first word
+        # If still not found, try AI similarity on candidates by first word
         if not found_materials and ai_extractor and name:
             first_word = name.split()[0] if name.split() else name
             candidates = db.search_materials(first_word)
