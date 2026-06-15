@@ -76,6 +76,42 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             await state.clear()
             return
 
+        # Auto-add new items to DB before price check
+        await message.answer("Проверяю базу данных и добавляю новые позиции...")
+        supplier_raw = invoice_data.get("supplier") or ""
+        invoice_num_raw = invoice_data.get("invoice_number") or ""
+        invoice_date_raw = invoice_data.get("invoice_date") or ""
+        auto_added = 0
+        for item in items:
+            raw_name = item.get("name", "").strip()
+            if not raw_name:
+                continue
+            price = item.get("price_no_vat") or item.get("price_with_vat")
+            unit = item.get("unit") or "шт"
+            characteristics = {k: v for k, v in item.items()
+                               if k not in ("name", "unit", "quantity", "price_no_vat",
+                                            "price_with_vat", "amount") and v}
+            normalized = ai_extractor.normalize_name(raw_name, characteristics)
+            if not db.get_material(normalized):
+                db.add_material({
+                    "Нормализованное наименование": normalized,
+                    "Единица измерения": unit,
+                    "Минимальная цена без НДС": price,
+                    "Поставщик минимальной цены": supplier_raw,
+                })
+                if price:
+                    mat = db.get_material(normalized)
+                    if mat:
+                        db.add_price_history({
+                            "ID материала": mat.get("ID"),
+                            "Цена без НДС": price,
+                            "Поставщик": supplier_raw,
+                            "Номер счета": invoice_num_raw,
+                            "Дата счета": invoice_date_raw,
+                            "Пользователь": str(message.from_user.id),
+                        })
+                auto_added += 1
+
         # Price check
         await message.answer("Сверяю цены с базой данных...")
         check_results = check_invoice(items, db)
@@ -105,6 +141,8 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
                 f"Потенциальная экономия: {total_savings:.2f} руб."
             )
 
+        auto_added_line = f"🆕 Автоматически добавлено в базу: {auto_added} новых позиций\n" if auto_added else ""
+
         summary = (
             f"✅ Счет № {invoice_num} от {invoice_date} проверен.\n"
             f"Поставщик: {supplier}\n\n"
@@ -112,7 +150,8 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             f"✅ Можно оплачивать: {ok}\n"
             f"⚠️ Требуют согласования: {need_approval}\n"
             f"❓ Не найдены в базе: {not_found}\n"
-            f"💰 Потенциальная экономия: {total_savings:.2f} руб. без НДС\n\n"
+            f"💰 Потенциальная экономия: {total_savings:.2f} руб. без НДС\n"
+            f"{auto_added_line}\n"
             f"📋 Итог: {conclusion}"
         )
 
@@ -193,7 +232,7 @@ async def handle_download_pdf(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "add_items_to_db")
 async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, user: dict):
     await callback.answer()
-    await callback.message.answer("Добавляю позиции в базу данных, подождите...")
+    await callback.message.answer("Обновляю цены в базе данных, подождите...")
 
     from bot.main import db
 
@@ -263,9 +302,8 @@ async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, use
 
     await callback.message.answer(
         f"Готово\n\n"
-        f"✅ Новых позиций добавлено: {added}\n"
         f"🔄 Цена обновлена (нашли дешевле): {updated}\n"
-        f"⏭ Пропущено (цена выше имеющейся): {skipped}"
+        f"⏭ Пропущено (цена не ниже имеющейся): {skipped + added}"
     )
 
 

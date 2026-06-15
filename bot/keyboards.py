@@ -31,7 +31,7 @@ def report_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📄 Скачать PDF", callback_data="report_pdf"),
         ],
         [
-            InlineKeyboardButton(text="➕ Добавить позиции в базу", callback_data="add_items_to_db"),
+            InlineKeyboardButton(text="🔄 Обновить цены в базе", callback_data="add_items_to_db"),
         ]
     ])
 
