@@ -96,6 +96,33 @@ class AIExtractor:
         except Exception as e:
             return {**self._empty_invoice(), "error": str(e)}
 
+    def resolve_price_no_vat(self, item: dict, invoice_data: dict) -> "float | None":
+        """Derive the VAT-exclusive price deterministically in code instead of
+        trusting the model's own division, so re-extracting the same invoice
+        always yields the same price (the model's arithmetic is not stable
+        across calls)."""
+        price_no_vat = item.get("price_no_vat")
+        price_with_vat = item.get("price_with_vat")
+
+        if price_with_vat is None:
+            return price_no_vat
+
+        try:
+            price_with_vat = float(price_with_vat)
+        except (TypeError, ValueError):
+            return price_no_vat
+
+        total_amount = invoice_data.get("total_amount")
+        vat_amount = invoice_data.get("vat_amount")
+        vat_rate = 20.0
+        try:
+            if total_amount and vat_amount and float(total_amount) > float(vat_amount):
+                vat_rate = float(vat_amount) / (float(total_amount) - float(vat_amount)) * 100
+        except (TypeError, ValueError):
+            pass
+
+        return round(price_with_vat / (1 + vat_rate / 100), 2)
+
     def _empty_invoice(self) -> dict:
         return {
             "invoice_number": None,

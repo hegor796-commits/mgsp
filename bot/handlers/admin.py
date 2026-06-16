@@ -386,7 +386,7 @@ async def _add_materials_from_text(message: Message, state: FSMContext, db, text
         name = (mat.get("name") or "").strip()
         if not name:
             continue
-        price = mat.get("price_no_vat") or mat.get("price_with_vat")
+        price = ai_extractor.resolve_price_no_vat(mat, invoice_data) or mat.get("price_with_vat")
         characteristics = {k: v for k, v in mat.items()
                            if k not in ("name", "unit", "quantity", "price_no_vat",
                                         "price_with_vat", "amount") and v}
