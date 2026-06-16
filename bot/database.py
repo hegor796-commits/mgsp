@@ -95,6 +95,16 @@ class ExcelDatabase:
         ws.append([telegram_id, name, role, email, "Да", date.today().strftime("%Y-%m-%d")])
         self._save_wb(wb)
 
+    def update_user_role(self, telegram_id, role: str) -> bool:
+        wb = self._load_wb()
+        ws = wb["Пользователи"]
+        for row in ws.iter_rows(min_row=2):
+            if row[0].value is not None and str(row[0].value) == str(telegram_id):
+                row[2].value = role
+                self._save_wb(wb)
+                return True
+        return False
+
     def get_material(self, normalized_name: str) -> Optional[dict]:
         try:
             wb = self._load_wb()

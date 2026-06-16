@@ -65,6 +65,7 @@ def cancel_keyboard() -> ReplyKeyboardMarkup:
 def admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👤 Добавить пользователя", callback_data="admin_add_user")],
+        [InlineKeyboardButton(text="✏️ Изменить роль пользователя", callback_data="admin_change_role")],
         [InlineKeyboardButton(text="📦 Добавить материал", callback_data="admin_add_material")],
         [InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_list_users")],
         [InlineKeyboardButton(text="🧹 Очистить дубликаты в базе", callback_data="admin_dedup")],

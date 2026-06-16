@@ -22,6 +22,11 @@ class AddUserStates(StatesGroup):
     waiting_for_role = State()
 
 
+class ChangeRoleStates(StatesGroup):
+    waiting_for_telegram_id = State()
+    waiting_for_role = State()
+
+
 class AddMaterialStates(StatesGroup):
     waiting_for_input = State()  # file or text describing material(s)
 
@@ -126,6 +131,80 @@ async def handle_add_material_start(callback: CallbackQuery, state: FSMContext, 
         "ИИ сам извлечёт названия, единицы измерения и цены и добавит в базу.",
         reply_markup=cancel_keyboard()
     )
+
+
+@router.callback_query(F.data == "admin_change_role")
+async def handle_change_role_start(callback: CallbackQuery, state: FSMContext, user: dict):
+    if not is_admin(user):
+        await callback.answer("Нет прав доступа.", show_alert=True)
+        return
+    await callback.answer()
+    await state.set_state(ChangeRoleStates.waiting_for_telegram_id)
+    await callback.message.answer(
+        "Введите Telegram ID пользователя, которому нужно изменить роль:",
+        reply_markup=cancel_keyboard()
+    )
+
+
+@router.message(ChangeRoleStates.waiting_for_telegram_id)
+async def handle_change_role_id(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer("Введите корректный числовой Telegram ID.")
+        return
+
+    from bot.main import db
+    target = db.get_user(int(text))
+    if target is None:
+        await message.answer("Пользователь с таким Telegram ID не найден в базе.")
+        return
+
+    await state.update_data(target_id=int(text), target_name=target.get("ФИО", ""))
+    await state.set_state(ChangeRoleStates.waiting_for_role)
+    await message.answer(
+        f"Пользователь: {target.get('ФИО', '—')}\n"
+        f"Текущая роль: {target.get('Роль', '—')}\n\n"
+        f"Введите новую роль:\n"
+        "• <code>user</code> — обычный пользователь\n"
+        "• <code>снабженец</code> — снабженец\n"
+        "• <code>admin</code> — администратор",
+        parse_mode="HTML"
+    )
+
+
+@router.message(ChangeRoleStates.waiting_for_role)
+async def handle_change_role_set(message: Message, state: FSMContext, user: dict):
+    role = message.text.strip().lower()
+    valid_roles = ["user", "снабженец", "admin"]
+    if role not in valid_roles:
+        await message.answer(
+            f"Некорректная роль. Допустимые значения: {', '.join(valid_roles)}"
+        )
+        return
+
+    data = await state.get_data()
+    target_id = data.get("target_id")
+    target_name = data.get("target_name")
+    await state.clear()
+
+    try:
+        from bot.main import db
+        db.update_user_role(target_id, role)
+        db.log_action(
+            message.from_user.id,
+            "Изменение роли пользователя",
+            f"ID: {target_id}, Имя: {target_name}, Новая роль: {role}"
+        )
+        admin_role = user.get("Роль", "admin") if user else "admin"
+        await message.answer(
+            f"✅ Роль обновлена:\n"
+            f"Пользователь: {target_name}\n"
+            f"Telegram ID: {target_id}\n"
+            f"Новая роль: {role}",
+            reply_markup=main_menu_keyboard(admin_role)
+        )
+    except Exception as e:
+        await message.answer(f"Ошибка при изменении роли: {e}")
 
 
 @router.callback_query(F.data == "admin_list_users")
