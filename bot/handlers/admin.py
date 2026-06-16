@@ -263,6 +263,45 @@ async def handle_dedup_text(message: Message, user: dict):
         await message.answer(f"Ошибка при очистке дубликатов: {e}")
 
 
+@router.callback_query(F.data == "admin_reset_materials")
+async def handle_reset_materials_confirm(callback: CallbackQuery, user: dict):
+    if not is_admin(user):
+        await callback.answer("Нет прав доступа.", show_alert=True)
+        return
+    await callback.answer()
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    await callback.message.answer(
+        "⚠️ Это удалит ВСЕ материалы и историю цен из базы без возможности восстановления.\n"
+        "Пользователи и журнал действий не затронуты.\n\n"
+        "Подтвердите удаление:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Да, удалить всё", callback_data="admin_reset_materials_confirm"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_reset_materials_cancel"),
+        ]])
+    )
+
+
+@router.callback_query(F.data == "admin_reset_materials_confirm")
+async def handle_reset_materials_do(callback: CallbackQuery, user: dict):
+    if not is_admin(user):
+        await callback.answer("Нет прав доступа.", show_alert=True)
+        return
+    await callback.answer()
+    try:
+        from bot.main import db
+        removed = db.reset_materials()
+        db.log_action(callback.from_user.id, "Полная очистка базы материалов", f"Удалено: {removed}")
+        await callback.message.answer(f"✅ База материалов очищена. Удалено позиций: {removed}")
+    except Exception as e:
+        await callback.message.answer(f"Ошибка при очистке базы: {e}")
+
+
+@router.callback_query(F.data == "admin_reset_materials_cancel")
+async def handle_reset_materials_cancel(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("Отменено.")
+
+
 @router.callback_query(F.data == "admin_dedup")
 async def handle_dedup(callback: CallbackQuery, user: dict):
     if not can_dedup(user):

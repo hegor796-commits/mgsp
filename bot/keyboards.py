@@ -69,6 +69,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📦 Добавить материал", callback_data="admin_add_material")],
         [InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin_list_users")],
         [InlineKeyboardButton(text="🧹 Очистить дубликаты в базе", callback_data="admin_dedup")],
+        [InlineKeyboardButton(text="🗑 Полностью очистить базу материалов", callback_data="admin_reset_materials")],
     ])
 
 

@@ -182,6 +182,17 @@ class ExcelDatabase:
         self._save_wb(wb)
         return str(new_id)
 
+    def reset_materials(self) -> int:
+        """Wipe all materials and price history, keep users/log/suppliers."""
+        wb = self._load_wb()
+        ws = wb["Материалы"]
+        count = sum(1 for row in ws.iter_rows(min_row=2, values_only=True) if row[0] is not None)
+        for ws_name in ("Материалы", "История цен", "Аналоги"):
+            ws = wb[ws_name]
+            ws.delete_rows(2, ws.max_row)
+        self._save_wb(wb)
+        return count
+
     def deduplicate_materials(self) -> int:
         """Remove duplicate materials (same normalized name), keep the one with lowest price."""
         wb = self._load_wb()
