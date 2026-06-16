@@ -345,7 +345,9 @@ async def _add_materials_from_text(message: Message, state: FSMContext, db, text
         name = (mat.get("name") or "").strip()
         if not name:
             continue
-        characteristics = {k: v for k, v in mat.items() if k != "name" and v}
+        characteristics = {k: v for k, v in mat.items()
+                           if k not in ("name", "unit", "price", "price_no_vat", "price_with_vat",
+                                        "quantity", "amount", "supplier", "category") and v}
         normalized = ai_extractor.normalize_name(name, characteristics)
         key = normalized.lower().strip()
         if key in seen:

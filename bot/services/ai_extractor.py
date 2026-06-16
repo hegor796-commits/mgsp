@@ -95,7 +95,9 @@ class AIExtractor:
     def extract_materials_for_db(self, text: str) -> list:
         """Extract a list of materials from arbitrary text (price list, catalog, invoice, etc.)"""
         prompt = f"""Извлеки список строительных материалов из текста ниже.
-Для каждого материала верни его наименование, единицу измерения, цену (если есть) и категорию.
+Для каждого материала найди цену максимально внимательно — ищи любую денежную величину
+рядом с наименованием: цена за единицу, цена с НДС, цена без НДС, сумма по позиции.
+Если есть и сумма, и количество, но нет цены за единицу — вычисли цену за единицу сам (сумма / количество).
 
 Текст:
 {text[:8000]}
@@ -106,7 +108,10 @@ class AIExtractor:
     {{
       "name": "наименование материала",
       "unit": "единица измерения (шт, м, м2, м3, кг, л, упак и т.д.)",
-      "price": цена числом без НДС или null,
+      "price_no_vat": цена за единицу без НДС числом или null,
+      "price_with_vat": цена за единицу с НДС числом или null,
+      "quantity": количество числом или null,
+      "amount": сумма по позиции числом или null,
       "supplier": "поставщик если указан или null",
       "category": "категория материала (кабели, трубы, крепёж и т.д.) или null"
     }}
@@ -114,11 +119,26 @@ class AIExtractor:
 }}
 
 Включай только реальные материалы/товары. Не включай услуги, работы, НДС, итого.
+Цену указывай null ТОЛЬКО если её действительно нигде нет в тексте рядом с этой позицией.
 """
         try:
             response = self._call_openai(prompt)
             data = self._parse_json(response)
-            return data.get("materials", [])
+            materials = data.get("materials", [])
+            for mat in materials:
+                price = mat.get("price_no_vat")
+                if price is None:
+                    price = mat.get("price_with_vat")
+                if price is None:
+                    amount = mat.get("amount")
+                    qty = mat.get("quantity")
+                    if amount and qty:
+                        try:
+                            price = float(amount) / float(qty)
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            price = None
+                mat["price"] = price
+            return materials
         except Exception:
             return []
 
