@@ -217,34 +217,45 @@ class AIExtractor:
         except Exception:
             return name
 
-    def _extract_codes(self, name: str) -> set:
-        """Extract digit-bearing tokens (model codes, diameters, sizes) from a
-        name for a deterministic pre-check. OCR and the AI's own wording can
-        vary slightly between runs on the identical physical item, but the
-        numeric model code/size is the most reliable invariant."""
-        codes = set()
-        for token in re.split(r"\s+", name.lower()):
-            if any(ch.isdigit() for ch in token):
-                normalized = re.sub(r"[xх×]", "*", token)
-                normalized = re.sub(r"[^a-zа-я0-9*]", "", normalized)
-                if normalized:
-                    codes.add(normalized)
-        return codes
+    def _extract_digit_groups(self, name: str) -> tuple:
+        """Extract just the numeric groups (sizes, diameters, model numbers)
+        from a name, ignoring surrounding letters entirely. OCR reliably
+        reads digits but often misreads letters (ф/cb/ch, в/B, с/c etc.), so
+        numbers are a far more stable signal for "is this the same item"
+        than the letters around them."""
+        return tuple(sorted(re.findall(r"\d+(?:[.,]\d+)?", name.lower())))
 
     def is_same_material(self, new_name: str, existing_name: str) -> bool:
-        """Ask AI whether two material names refer to the same physical item."""
-        new_codes = self._extract_codes(new_name)
-        existing_codes = self._extract_codes(existing_name)
-        if new_codes and existing_codes and new_codes == existing_codes:
+        """Decide whether two names refer to the same physical item.
+
+        OCR text for the same physical document can come out slightly
+        different each time (letters especially), and the AI's own wording
+        when normalizing differs too. So a literal string/code comparison
+        is not reliable on its own — first check whether the numeric specs
+        (sizes/diameters/model numbers) match, which is robust to OCR
+        letter noise, and otherwise ask the AI to judge it semantically,
+        explicitly telling it to look past likely OCR typos in letters."""
+        new_digits = self._extract_digit_groups(new_name)
+        existing_digits = self._extract_digit_groups(existing_name)
+        if new_digits and existing_digits and new_digits == existing_digits:
             return True
 
-        prompt = f"""Определи, являются ли два наименования одним и тем же строительным материалом.
+        prompt = f"""Определи, являются ли два наименования ОДНИМ И ТЕМ ЖЕ строительным материалом/товаром.
 
 Наименование 1: {new_name}
 Наименование 2: {existing_name}
 
-Считай их одинаковыми ТОЛЬКО если это абсолютно тот же товар с теми же характеристиками.
-Разные размеры, диаметры, резьбы, марки — это РАЗНЫЕ товары.
+Важно: оба наименования получены через OCR (распознавание текста с фото/сканов счетов) или
+сформированы разными поставщиками, поэтому в них могут быть:
+- опечатки и замены букв (особенно похожих кириллица/латиница: с/c, в/B, о/0, ф/cb/ch и т.п.);
+- сокращения, разный порядок слов, отсутствие или наличие бренда/артикула;
+- разное оформление размеров (600x400, 600*400, 600х400 — это одно и то же).
+
+Не сравнивай строки буквально — пойми, о каком РЕАЛЬНОМ физическом товаре идёт речь.
+Считай их одинаковым товаром, если совпадают тип изделия и ключевые технические характеристики
+(размер, диаметр, резьба, типоразмер, марка), даже если буквы/опечатки/порядок слов отличаются.
+Считай их РАЗНЫМИ товарами только если различаются реальные характеристики (другой размер,
+другой диаметр, другая модель), а не просто другое написание/опечатка.
 
 Верни JSON:
 {{"same": true/false, "reason": "краткое пояснение"}}
