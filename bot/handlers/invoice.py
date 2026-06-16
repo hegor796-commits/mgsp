@@ -148,6 +148,13 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
                             "Пользователь": str(message.from_user.id),
                         })
                 auto_added += 1
+            elif price:
+                existing_price = existing.get("Минимальная цена без НДС")
+                if existing_price is None or float(price) < float(existing_price):
+                    db.update_min_price(
+                        existing["ID"], float(price), supplier_raw,
+                        invoice_num_raw, invoice_date_raw, message.from_user.id
+                    )
 
         # Price check (uses normalized names that are now in DB)
         await message.answer("Сверяю цены с базой данных...")
