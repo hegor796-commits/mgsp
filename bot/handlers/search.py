@@ -97,19 +97,23 @@ async def handle_min_price_result(message: Message, state: FSMContext, user: dic
         )
         return
 
-    mat = results[0]
-    name = mat.get("Нормализованное наименование", "—")
-    min_price = mat.get("Минимальная цена без НДС")
-    supplier = mat.get("Поставщик минимальной цены", "—")
-    updated = mat.get("Дата последнего обновления", "—")
-    price_str = f"{float(min_price):.2f} руб. без НДС" if min_price is not None else "не указана"
+    blocks = []
+    for mat in results[:15]:
+        name = mat.get("Нормализованное наименование", "—")
+        min_price = mat.get("Минимальная цена без НДС")
+        supplier = mat.get("Поставщик минимальной цены", "—")
+        updated = mat.get("Дата последнего обновления", "—")
+        price_str = f"{float(min_price):.2f} руб. без НДС" if min_price is not None else "не указана"
+        blocks.append(
+            f"Наименование: {name}\n"
+            f"Мин. цена: {price_str}\n"
+            f"Поставщик: {supplier}\n"
+            f"Дата обновления: {updated}"
+        )
 
+    header = f"💰 Найдено {len(results)} позиций по запросу «{query}»:\n\n"
     await message.answer(
-        f"💰 Минимальная цена для материала:\n\n"
-        f"Наименование: {name}\n"
-        f"Мин. цена: {price_str}\n"
-        f"Поставщик: {supplier}\n"
-        f"Дата обновления: {updated}",
+        header + "\n\n".join(blocks),
         reply_markup=main_menu_keyboard(role)
     )
 
