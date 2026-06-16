@@ -29,12 +29,17 @@ def parse_pdf(file_path: str) -> str:
         pass
 
     if not text.strip():
-        # Fallback to OCR
+        # Fallback to OCR. psm 6 (uniform block of text) with preserved
+        # interword spacing keeps table columns aligned in the OCR output,
+        # instead of numeric columns (price/quantity) getting dropped.
         try:
             with pdfplumber.open(file_path) as pdf:
                 for page in pdf.pages:
-                    img = page.to_image(resolution=200).original
-                    ocr_text = pytesseract.image_to_string(img, lang="rus+eng")
+                    img = page.to_image(resolution=300).original
+                    ocr_text = pytesseract.image_to_string(
+                        img, lang="rus+eng",
+                        config="--psm 6 -c preserve_interword_spaces=1"
+                    )
                     text += ocr_text + "\n"
         except Exception:
             pass
@@ -76,7 +81,10 @@ def parse_word(file_path: str) -> str:
 def parse_image(file_path: str) -> str:
     try:
         img = Image.open(file_path)
-        text = pytesseract.image_to_string(img, lang="rus+eng")
+        text = pytesseract.image_to_string(
+            img, lang="rus+eng",
+            config="--psm 6 -c preserve_interword_spaces=1"
+        )
         return text.strip()
     except Exception as e:
         return f"Ошибка распознавания изображения: {e}"
