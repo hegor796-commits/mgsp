@@ -12,9 +12,19 @@ def parse_pdf(file_path: str) -> str:
     try:
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
+                tables = page.extract_tables()
+                if tables:
+                    for table in tables:
+                        for row in table:
+                            row_text = "\t".join(
+                                (cell or "").strip().replace("\n", " ") for cell in row
+                            )
+                            if row_text.strip():
+                                text += row_text + "\n"
+                else:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
     except Exception:
         pass
 
