@@ -15,10 +15,11 @@ class AIExtractor:
         self.client = OpenAI(api_key=api_key)
         self.model = "gpt-4o"
 
-    def _call_openai(self, prompt: str, system: str = None) -> str:
+    def _call_openai(self, prompt: str, system: str = None, temperature: float = 0) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
             max_tokens=4096,
+            temperature=temperature,
             messages=[
                 {"role": "system", "content": system or SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
