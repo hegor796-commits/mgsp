@@ -217,8 +217,27 @@ class AIExtractor:
         except Exception:
             return name
 
+    def _extract_codes(self, name: str) -> set:
+        """Extract digit-bearing tokens (model codes, diameters, sizes) from a
+        name for a deterministic pre-check. OCR and the AI's own wording can
+        vary slightly between runs on the identical physical item, but the
+        numeric model code/size is the most reliable invariant."""
+        codes = set()
+        for token in re.split(r"\s+", name.lower()):
+            if any(ch.isdigit() for ch in token):
+                normalized = re.sub(r"[xх×]", "*", token)
+                normalized = re.sub(r"[^a-zа-я0-9*]", "", normalized)
+                if normalized:
+                    codes.add(normalized)
+        return codes
+
     def is_same_material(self, new_name: str, existing_name: str) -> bool:
         """Ask AI whether two material names refer to the same physical item."""
+        new_codes = self._extract_codes(new_name)
+        existing_codes = self._extract_codes(existing_name)
+        if new_codes and existing_codes and new_codes == existing_codes:
+            return True
+
         prompt = f"""Определи, являются ли два наименования одним и тем же строительным материалом.
 
 Наименование 1: {new_name}
