@@ -105,6 +105,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             if not raw_name:
                 continue
             price = ai_extractor.resolve_price_no_vat(item, invoice_data) or item.get("price_with_vat")
+            item["price_no_vat"] = price  # keep consistent with the price stored in the DB below
             unit = item.get("unit") or "шт"
             characteristics = {k: v for k, v in item.items()
                                if k not in ("name", "unit", "quantity", "price_no_vat",
@@ -317,6 +318,7 @@ async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, use
             continue
 
         price = ai_extractor.resolve_price_no_vat(item, invoice_data) or item.get("price_with_vat")
+        item["price_no_vat"] = price
         unit = item.get("unit") or "шт"
 
         # Normalize name via AI
