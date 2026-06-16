@@ -367,7 +367,9 @@ async def handle_kb_text(message: Message, state: FSMContext, user: dict):
 
 async def _add_materials_from_text(message: Message, state: FSMContext, db, text: str, user: dict):
     await message.answer("ИИ извлекает материалы из текста...")
-    extracted = ai_extractor.extract_materials_for_db(text)
+    invoice_data = ai_extractor.extract_invoice(text)
+    extracted = invoice_data.get("items", [])
+    supplier = invoice_data.get("supplier") or ""
 
     if not extracted:
         await message.answer("Не удалось найти материалы в тексте. Попробуйте другой формат.")
@@ -384,9 +386,10 @@ async def _add_materials_from_text(message: Message, state: FSMContext, db, text
         name = (mat.get("name") or "").strip()
         if not name:
             continue
+        price = mat.get("price_no_vat") or mat.get("price_with_vat")
         characteristics = {k: v for k, v in mat.items()
-                           if k not in ("name", "unit", "price", "price_no_vat", "price_with_vat",
-                                        "quantity", "amount", "supplier", "category") and v}
+                           if k not in ("name", "unit", "quantity", "price_no_vat",
+                                        "price_with_vat", "amount") and v}
         normalized = ai_extractor.normalize_name(name, characteristics)
         key = normalized.lower().strip()
         if key in seen:
@@ -406,9 +409,8 @@ async def _add_materials_from_text(message: Message, state: FSMContext, db, text
             db.add_material({
                 "Нормализованное наименование": normalized,
                 "Единица измерения": mat.get("unit") or "шт",
-                "Минимальная цена без НДС": mat.get("price"),
-                "Поставщик минимальной цены": mat.get("supplier") or "",
-                "Категория": mat.get("category") or "",
+                "Минимальная цена без НДС": price,
+                "Поставщик минимальной цены": supplier,
             })
             added += 1
         else:
