@@ -51,6 +51,13 @@ async def handle_upload_invoice(message: Message, state: FSMContext):
 
 @router.message(InvoiceStates.waiting_for_file, F.document | F.photo)
 async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict):
+    # Redirect ZIP archives to the batch processor instead of treating them
+    # as a single invoice file.
+    if message.document and (message.document.file_name or "").lower().endswith(".zip"):
+        await state.clear()
+        await handle_zip(message, state, bot, user)
+        return
+
     await message.answer("Файл получен. Обрабатываю, пожалуйста подождите...")
 
     from bot.main import db
