@@ -521,7 +521,7 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
                 # can't stall the entire batch for hours.
                 added, updated = await asyncio.wait_for(
                     _process_zip_file(file_path, db, user_id),
-                    timeout=90
+                    timeout=180
                 )
                 added_total += added
                 updated_total += updated

@@ -7,11 +7,15 @@ from PIL import Image
 import openpyxl
 
 
+MAX_PDF_PAGES = 5  # invoices are rarely longer; later pages are usually T&C
+
+
 def parse_pdf(file_path: str) -> str:
     text = ""
     try:
         with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
+            pages = pdf.pages[:MAX_PDF_PAGES]
+            for page in pages:
                 tables = page.extract_tables()
                 if tables:
                     for table in tables:
@@ -29,13 +33,15 @@ def parse_pdf(file_path: str) -> str:
         pass
 
     if not text.strip():
-        # Fallback to OCR. psm 6 (uniform block of text) with preserved
-        # interword spacing keeps table columns aligned in the OCR output,
-        # instead of numeric columns (price/quantity) getting dropped.
+        # Fallback to OCR. psm 6 with preserved interword spacing keeps table
+        # columns aligned. Use 150 DPI instead of 300 — printed invoice text
+        # is fully readable at 150 DPI and renders 4x faster, preventing large
+        # scanned PDFs from stalling batch processing for hours.
         try:
             with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
-                    img = page.to_image(resolution=300).original
+                pages = pdf.pages[:MAX_PDF_PAGES]
+                for page in pages:
+                    img = page.to_image(resolution=150).original
                     ocr_text = pytesseract.image_to_string(
                         img, lang="rus+eng",
                         config="--psm 6 -c preserve_interword_spaces=1"
