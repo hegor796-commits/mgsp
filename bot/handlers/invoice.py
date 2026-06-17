@@ -405,18 +405,17 @@ async def handle_zip(message: Message, state: FSMContext, bot: Bot, user: dict):
     )
 
 
-async def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]:
-    """Process one file from a ZIP batch. Returns (added, updated) counts.
-    Runs synchronous OCR in a thread executor so the event loop isn't blocked,
-    which is what allows asyncio.wait_for to enforce the per-file timeout."""
-    loop = asyncio.get_event_loop()
+def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]:
+    """Process one file from a ZIP batch synchronously.
+    Returns (added, updated) counts. Blocking is acceptable here since
+    page limit + 150 DPI keeps each file under ~30 s."""
     from bot.services.ocr import detect_and_parse
 
-    text = await loop.run_in_executor(None, detect_and_parse, file_path)
+    text = detect_and_parse(file_path)
     if not text or len(text.strip()) < 10:
         return 0, 0
 
-    invoice_data = await loop.run_in_executor(None, ai_extractor.extract_invoice, text)
+    invoice_data = ai_extractor.extract_invoice(text)
     items = invoice_data.get("items", [])
     if not items:
         return 0, 0
@@ -437,9 +436,7 @@ async def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]
         characteristics = {k: v for k, v in item.items()
                            if k not in ("name", "unit", "quantity", "price_no_vat",
                                         "price_with_vat", "amount") and v}
-        normalized = await loop.run_in_executor(
-            None, ai_extractor.normalize_name, raw_name, characteristics
-        )
+        normalized = ai_extractor.normalize_name(raw_name, characteristics)
         key = normalized.lower().strip()
         if key in seen:
             continue
@@ -450,9 +447,7 @@ async def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]
             first_word = normalized.split()[0] if normalized.split() else normalized
             for candidate in db.search_materials(first_word)[:10]:
                 cand_name = candidate.get("Нормализованное наименование", "")
-                if await loop.run_in_executor(
-                    None, ai_extractor.is_same_material, normalized, cand_name
-                ):
+                if ai_extractor.is_same_material(normalized, cand_name):
                     existing = candidate
                     break
 
@@ -524,16 +519,9 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
                 continue
 
             try:
-                # 90-second hard timeout per file so one huge/corrupt scan
-                # can't stall the entire batch for hours.
-                added, updated = await asyncio.wait_for(
-                    _process_zip_file(file_path, db, user_id),
-                    timeout=180
-                )
+                added, updated = _process_zip_file(file_path, db, user_id)
                 added_total += added
                 updated_total += updated
-            except asyncio.TimeoutError:
-                errors += 1
             except Exception:
                 errors += 1
 
