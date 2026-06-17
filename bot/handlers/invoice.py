@@ -377,7 +377,7 @@ async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, use
     )
 
 
-@router.message(F.document.func(lambda d: d.file_name and d.file_name.lower().endswith(".zip")))
+@router.message(F.document, F.document.func(lambda d: (d.file_name or "").lower().endswith(".zip")))
 async def handle_zip(message: Message, state: FSMContext, bot: Bot, user: dict):
     """Handle a ZIP archive containing multiple invoice files."""
     await state.clear()
