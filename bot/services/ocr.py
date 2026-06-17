@@ -48,18 +48,34 @@ def parse_pdf(file_path: str) -> str:
 
 
 def parse_excel(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower()
     lines = []
-    try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            lines.append(f"=== Лист: {sheet_name} ===")
-            for row in ws.iter_rows(values_only=True):
-                row_values = [str(cell) if cell is not None else "" for cell in row]
-                if any(v.strip() for v in row_values):
-                    lines.append("\t".join(row_values))
-    except Exception as e:
-        lines.append(f"Ошибка чтения Excel: {e}")
+    if ext == ".xls":
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(file_path)
+            for sheet_name in wb.sheet_names():
+                ws = wb.sheet_by_name(sheet_name)
+                lines.append(f"=== Лист: {sheet_name} ===")
+                for row_idx in range(ws.nrows):
+                    row_values = [str(ws.cell_value(row_idx, c)) if ws.cell_value(row_idx, c) != "" else ""
+                                  for c in range(ws.ncols)]
+                    if any(v.strip() for v in row_values):
+                        lines.append("\t".join(row_values))
+        except Exception as e:
+            lines.append(f"Ошибка чтения XLS: {e}")
+    else:
+        try:
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                lines.append(f"=== Лист: {sheet_name} ===")
+                for row in ws.iter_rows(values_only=True):
+                    row_values = [str(cell) if cell is not None else "" for cell in row]
+                    if any(v.strip() for v in row_values):
+                        lines.append("\t".join(row_values))
+        except Exception as e:
+            lines.append(f"Ошибка чтения Excel: {e}")
     return "\n".join(lines)
 
 
