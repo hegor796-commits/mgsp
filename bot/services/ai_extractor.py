@@ -11,9 +11,9 @@ SYSTEM_PROMPT = """Ты — специализированный ассисте�
 
 
 class AIExtractor:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = "gpt-4o"):
         self.client = OpenAI(api_key=api_key)
-        self.model = "gpt-4o"
+        self.model = model
 
     def _call_openai(self, prompt: str, system: str = None, temperature: float = 0) -> str:
         response = self.client.chat.completions.create(

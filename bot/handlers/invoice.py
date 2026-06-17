@@ -411,10 +411,9 @@ def _process_zip_file(file_path: str, db, user_id: int, api_key: str) -> tuple[i
     the file yielded nothing so callers can report diagnostics."""
     from bot.services.ocr import detect_and_parse
     from bot.services.ai_extractor import AIExtractor
-    from openai import OpenAI
 
-    # Each thread gets its own HTTP client to avoid event-loop conflicts
-    extractor = AIExtractor(api_key)
+    # gpt-4o-mini: ~500 RPM limit vs ~10 RPM for gpt-4o — essential for batch
+    extractor = AIExtractor(api_key, model="gpt-4o-mini")
 
     text = detect_and_parse(file_path)
     if not text or len(text.strip()) < 10:
@@ -543,27 +542,33 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
         skipped_empty = 0
         skipped_no_items = 0
         processed = 0
+        # Limit to 3 concurrent threads to stay within OpenAI rate limits
+        semaphore = asyncio.Semaphore(3)
 
-        for member in members:
+        async def process_one(member: str):
+            nonlocal added_total, updated_total, errors, skipped_empty, skipped_no_items, processed
             file_path = os.path.join(zip_dir, member)
             if not os.path.isfile(file_path):
-                continue
+                return
+            async with semaphore:
+                try:
+                    added, updated, skip_reason = await asyncio.to_thread(
+                        _process_zip_file, file_path, db, user_id, settings.OPENAI_API_KEY
+                    )
+                    added_total += added
+                    updated_total += updated
+                    if skip_reason == "empty_text":
+                        skipped_empty += 1
+                    elif skip_reason == "no_items":
+                        skipped_no_items += 1
+                except Exception:
+                    errors += 1
+                processed += 1
 
-            try:
-                added, updated, skip_reason = await asyncio.to_thread(
-                    _process_zip_file, file_path, db, user_id, settings.OPENAI_API_KEY
-                )
-                added_total += added
-                updated_total += updated
-                if skip_reason == "empty_text":
-                    skipped_empty += 1
-                elif skip_reason == "no_items":
-                    skipped_no_items += 1
-            except Exception:
-                errors += 1
-
-            processed += 1
-            if processed % 10 == 0 or processed == total:
+        tasks = [asyncio.create_task(process_one(m)) for m in members]
+        for i, task in enumerate(asyncio.as_completed(tasks)):
+            await task
+            if (i + 1) % 10 == 0 or (i + 1) == len(tasks):
                 await bot.send_message(
                     chat_id,
                     f"⏳ Обработано {processed}/{total} файлов...\n"
