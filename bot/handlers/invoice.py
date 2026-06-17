@@ -398,6 +398,88 @@ async def handle_zip(message: Message, state: FSMContext, bot: Bot, user: dict):
     )
 
 
+async def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]:
+    """Process one file from a ZIP batch. Returns (added, updated) counts.
+    Runs synchronous OCR in a thread executor so the event loop isn't blocked,
+    which is what allows asyncio.wait_for to enforce the per-file timeout."""
+    loop = asyncio.get_event_loop()
+    from bot.services.ocr import detect_and_parse
+
+    text = await loop.run_in_executor(None, detect_and_parse, file_path)
+    if not text or len(text.strip()) < 10:
+        return 0, 0
+
+    invoice_data = await loop.run_in_executor(None, ai_extractor.extract_invoice, text)
+    items = invoice_data.get("items", [])
+    if not items:
+        return 0, 0
+
+    supplier = invoice_data.get("supplier") or ""
+    invoice_num = invoice_data.get("invoice_number") or ""
+    invoice_date = invoice_data.get("invoice_date") or ""
+    seen: set[str] = set()
+    added = updated = 0
+
+    for item in items:
+        raw_name = (item.get("name") or "").strip()
+        if not raw_name:
+            continue
+        price = ai_extractor.resolve_price_no_vat(item, invoice_data) or item.get("price_with_vat")
+        item["price_no_vat"] = price
+        unit = item.get("unit") or "шт"
+        characteristics = {k: v for k, v in item.items()
+                           if k not in ("name", "unit", "quantity", "price_no_vat",
+                                        "price_with_vat", "amount") and v}
+        normalized = await loop.run_in_executor(
+            None, ai_extractor.normalize_name, raw_name, characteristics
+        )
+        key = normalized.lower().strip()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        existing = db.get_material(normalized)
+        if existing is None:
+            first_word = normalized.split()[0] if normalized.split() else normalized
+            for candidate in db.search_materials(first_word)[:10]:
+                cand_name = candidate.get("Нормализованное наименование", "")
+                if await loop.run_in_executor(
+                    None, ai_extractor.is_same_material, normalized, cand_name
+                ):
+                    existing = candidate
+                    break
+
+        if existing is None:
+            db.add_material({
+                "Нормализованное наименование": normalized,
+                "Единица измерения": unit,
+                "Минимальная цена без НДС": price,
+                "Поставщик минимальной цены": supplier,
+            })
+            if price:
+                mat = db.get_material(normalized)
+                if mat:
+                    db.add_price_history({
+                        "ID материала": mat.get("ID"),
+                        "Цена без НДС": price,
+                        "Поставщик": supplier,
+                        "Номер счета": invoice_num,
+                        "Дата счета": invoice_date,
+                        "Пользователь": str(user_id),
+                    })
+            added += 1
+        elif price:
+            existing_price = existing.get("Минимальная цена без НДС")
+            if existing_price is None or float(price) < float(existing_price):
+                db.update_min_price(
+                    existing["ID"], float(price), supplier,
+                    invoice_num, invoice_date, user_id
+                )
+                updated += 1
+
+    return added, updated
+
+
 async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id: str, db):
     """Background task: unpack ZIP, extract + normalize each invoice, update DB."""
     zip_dir = os.path.join(settings.STORAGE_PATH, f"zip_{user_id}")
@@ -435,78 +517,16 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
                 continue
 
             try:
-                from bot.services.ocr import detect_and_parse
-                text = detect_and_parse(file_path)
-                if not text or len(text.strip()) < 10:
-                    errors += 1
-                    processed += 1
-                    continue
-
-                invoice_data = ai_extractor.extract_invoice(text)
-                items = invoice_data.get("items", [])
-                if not items:
-                    errors += 1
-                    processed += 1
-                    continue
-
-                supplier = invoice_data.get("supplier") or ""
-                invoice_num = invoice_data.get("invoice_number") or ""
-                invoice_date = invoice_data.get("invoice_date") or ""
-                seen: set[str] = set()
-
-                for item in items:
-                    raw_name = (item.get("name") or "").strip()
-                    if not raw_name:
-                        continue
-                    price = ai_extractor.resolve_price_no_vat(item, invoice_data) or item.get("price_with_vat")
-                    item["price_no_vat"] = price
-                    unit = item.get("unit") or "шт"
-                    characteristics = {k: v for k, v in item.items()
-                                       if k not in ("name", "unit", "quantity", "price_no_vat",
-                                                    "price_with_vat", "amount") and v}
-                    normalized = ai_extractor.normalize_name(raw_name, characteristics)
-                    key = normalized.lower().strip()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-
-                    existing = db.get_material(normalized)
-                    if existing is None:
-                        first_word = normalized.split()[0] if normalized.split() else normalized
-                        for candidate in db.search_materials(first_word)[:10]:
-                            cand_name = candidate.get("Нормализованное наименование", "")
-                            if ai_extractor.is_same_material(normalized, cand_name):
-                                existing = candidate
-                                break
-
-                    if existing is None:
-                        db.add_material({
-                            "Нормализованное наименование": normalized,
-                            "Единица измерения": unit,
-                            "Минимальная цена без НДС": price,
-                            "Поставщик минимальной цены": supplier,
-                        })
-                        if price:
-                            mat = db.get_material(normalized)
-                            if mat:
-                                db.add_price_history({
-                                    "ID материала": mat.get("ID"),
-                                    "Цена без НДС": price,
-                                    "Поставщик": supplier,
-                                    "Номер счета": invoice_num,
-                                    "Дата счета": invoice_date,
-                                    "Пользователь": str(user_id),
-                                })
-                        added_total += 1
-                    elif price:
-                        existing_price = existing.get("Минимальная цена без НДС")
-                        if existing_price is None or float(price) < float(existing_price):
-                            db.update_min_price(
-                                existing["ID"], float(price), supplier,
-                                invoice_num, invoice_date, user_id
-                            )
-                            updated_total += 1
-
+                # 90-second hard timeout per file so one huge/corrupt scan
+                # can't stall the entire batch for hours.
+                added, updated = await asyncio.wait_for(
+                    _process_zip_file(file_path, db, user_id),
+                    timeout=90
+                )
+                added_total += added
+                updated_total += updated
+            except asyncio.TimeoutError:
+                errors += 1
             except Exception:
                 errors += 1
 
