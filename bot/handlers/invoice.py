@@ -542,8 +542,8 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
         skipped_empty = 0
         skipped_no_items = 0
         processed = 0
-        # Limit to 3 concurrent threads to stay within OpenAI rate limits
-        semaphore = asyncio.Semaphore(3)
+        # Process one file at a time; _call_openai also rate-limits to 1 req/s
+        semaphore = asyncio.Semaphore(1)
 
         async def process_one(member: str):
             nonlocal added_total, updated_total, errors, skipped_empty, skipped_no_items, processed
