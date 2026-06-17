@@ -1,6 +1,8 @@
 import os
 import json
 import asyncio
+import zipfile
+import shutil
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
@@ -366,6 +368,179 @@ async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, use
         f"🔄 Цена обновлена (нашли дешевле): {updated}\n"
         f"⏭ Пропущено (цена не ниже имеющейся): {skipped + added}"
     )
+
+
+@router.message(F.document.func(lambda d: d.file_name and d.file_name.lower().endswith(".zip")))
+async def handle_zip(message: Message, state: FSMContext, bot: Bot, user: dict):
+    """Handle a ZIP archive containing multiple invoice files."""
+    await state.clear()
+    file_size_mb = (message.document.file_size or 0) / 1024 / 1024
+    if file_size_mb > 19:
+        await message.answer(
+            f"⚠️ Файл слишком большой ({file_size_mb:.1f} МБ). "
+            "Telegram позволяет загружать файлы до 20 МБ. "
+            "Разбейте архив на несколько частей."
+        )
+        return
+
+    await message.answer(
+        "📦 ZIP-архив получен. Начинаю обработку в фоне — "
+        "я буду сообщать о прогрессе каждые 10 файлов.\n\n"
+        "Пока идёт обработка, можете пользоваться ботом в обычном режиме."
+    )
+
+    from bot.main import db
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    asyncio.create_task(
+        _process_zip_background(bot, chat_id, user_id, message.document.file_id, db)
+    )
+
+
+async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id: str, db):
+    """Background task: unpack ZIP, extract + normalize each invoice, update DB."""
+    zip_dir = os.path.join(settings.STORAGE_PATH, f"zip_{user_id}")
+    zip_path = os.path.join(settings.STORAGE_PATH, f"zip_{user_id}.zip")
+    os.makedirs(settings.STORAGE_PATH, exist_ok=True)
+
+    try:
+        await bot.download(file_id, destination=zip_path)
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            # Filter out macOS/hidden junk files
+            members = [
+                m for m in zf.namelist()
+                if not os.path.basename(m).startswith("._")
+                and not os.path.basename(m).startswith("__MACOSX")
+                and os.path.basename(m)  # skip directory entries
+            ]
+            zf.extractall(zip_dir)
+
+        total = len(members)
+        if total == 0:
+            await bot.send_message(chat_id, "❌ Архив пуст или не содержит поддерживаемых файлов.")
+            return
+
+        await bot.send_message(chat_id, f"🗂 Найдено файлов в архиве: {total}. Начинаю обработку...")
+
+        added_total = 0
+        updated_total = 0
+        errors = 0
+        processed = 0
+
+        for member in members:
+            file_path = os.path.join(zip_dir, member)
+            if not os.path.isfile(file_path):
+                continue
+
+            try:
+                from bot.services.ocr import detect_and_parse
+                text = detect_and_parse(file_path)
+                if not text or len(text.strip()) < 10:
+                    errors += 1
+                    processed += 1
+                    continue
+
+                invoice_data = ai_extractor.extract_invoice(text)
+                items = invoice_data.get("items", [])
+                if not items:
+                    errors += 1
+                    processed += 1
+                    continue
+
+                supplier = invoice_data.get("supplier") or ""
+                invoice_num = invoice_data.get("invoice_number") or ""
+                invoice_date = invoice_data.get("invoice_date") or ""
+                seen: set[str] = set()
+
+                for item in items:
+                    raw_name = (item.get("name") or "").strip()
+                    if not raw_name:
+                        continue
+                    price = ai_extractor.resolve_price_no_vat(item, invoice_data) or item.get("price_with_vat")
+                    item["price_no_vat"] = price
+                    unit = item.get("unit") or "шт"
+                    characteristics = {k: v for k, v in item.items()
+                                       if k not in ("name", "unit", "quantity", "price_no_vat",
+                                                    "price_with_vat", "amount") and v}
+                    normalized = ai_extractor.normalize_name(raw_name, characteristics)
+                    key = normalized.lower().strip()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    existing = db.get_material(normalized)
+                    if existing is None:
+                        first_word = normalized.split()[0] if normalized.split() else normalized
+                        for candidate in db.search_materials(first_word)[:10]:
+                            cand_name = candidate.get("Нормализованное наименование", "")
+                            if ai_extractor.is_same_material(normalized, cand_name):
+                                existing = candidate
+                                break
+
+                    if existing is None:
+                        db.add_material({
+                            "Нормализованное наименование": normalized,
+                            "Единица измерения": unit,
+                            "Минимальная цена без НДС": price,
+                            "Поставщик минимальной цены": supplier,
+                        })
+                        if price:
+                            mat = db.get_material(normalized)
+                            if mat:
+                                db.add_price_history({
+                                    "ID материала": mat.get("ID"),
+                                    "Цена без НДС": price,
+                                    "Поставщик": supplier,
+                                    "Номер счета": invoice_num,
+                                    "Дата счета": invoice_date,
+                                    "Пользователь": str(user_id),
+                                })
+                        added_total += 1
+                    elif price:
+                        existing_price = existing.get("Минимальная цена без НДС")
+                        if existing_price is None or float(price) < float(existing_price):
+                            db.update_min_price(
+                                existing["ID"], float(price), supplier,
+                                invoice_num, invoice_date, user_id
+                            )
+                            updated_total += 1
+
+            except Exception:
+                errors += 1
+
+            processed += 1
+            if processed % 10 == 0 or processed == total:
+                await bot.send_message(
+                    chat_id,
+                    f"⏳ Обработано {processed}/{total} файлов...\n"
+                    f"✅ Добавлено позиций: {added_total}\n"
+                    f"🔄 Цена обновлена: {updated_total}\n"
+                    f"❌ Ошибок: {errors}"
+                )
+
+        db.log_action(user_id, "Пакетная обработка ZIP",
+                      f"Файлов: {total}, добавлено: {added_total}, обновлено: {updated_total}, ошибок: {errors}")
+
+        await bot.send_message(
+            chat_id,
+            f"🎉 Обработка архива завершена!\n\n"
+            f"📂 Всего файлов: {total}\n"
+            f"✅ Новых позиций добавлено в базу: {added_total}\n"
+            f"🔄 Цен обновлено (нашли дешевле): {updated_total}\n"
+            f"❌ Файлов с ошибками (нечитаемые/не счета): {errors}"
+        )
+
+    except zipfile.BadZipFile:
+        await bot.send_message(chat_id, "❌ Не удалось открыть архив. Убедитесь, что файл является корректным ZIP.")
+    except Exception as e:
+        await bot.send_message(chat_id, f"❌ Ошибка при обработке архива: {e}")
+    finally:
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        if os.path.exists(zip_dir):
+            shutil.rmtree(zip_dir, ignore_errors=True)
 
 
 @router.message(F.text == "❌ Отмена")
