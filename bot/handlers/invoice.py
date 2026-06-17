@@ -7,7 +7,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 
 from bot.config import settings
 from bot.keyboards import main_menu_keyboard, report_keyboard, cancel_keyboard
@@ -570,7 +570,7 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
             shutil.rmtree(zip_dir, ignore_errors=True)
 
 
-@router.message(F.text == "❌ Отмена")
+@router.message(StateFilter("*"), F.text == "❌ Отмена")
 async def handle_cancel(message: Message, state: FSMContext, user: dict):
     await state.clear()
     role = user.get("Роль", "user") if user else "user"

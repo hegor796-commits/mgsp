@@ -2,6 +2,7 @@ from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import StateFilter
 
 from bot.config import settings
 from bot.keyboards import main_menu_keyboard, admin_keyboard, cancel_keyboard
@@ -60,7 +61,7 @@ async def handle_add_user_start(callback: CallbackQuery, state: FSMContext, user
     )
 
 
-@router.message(F.text == "❌ Отмена")
+@router.message(StateFilter("*"), F.text == "❌ Отмена")
 async def handle_cancel_admin(message: Message, state: FSMContext, user: dict):
     await state.clear()
     role = user.get("Роль", "user") if user else "user"

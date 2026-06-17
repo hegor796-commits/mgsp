@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import StateFilter
 
 from bot.keyboards import main_menu_keyboard, cancel_keyboard
 
@@ -14,7 +15,7 @@ class SearchStates(StatesGroup):
     waiting_for_analog_query = State()
 
 
-@router.message(F.text == "❌ Отмена")
+@router.message(StateFilter("*"), F.text == "❌ Отмена")
 async def handle_cancel_search(message: Message, state: FSMContext, user: dict):
     await state.clear()
     role = user.get("Роль", "user") if user else "user"
