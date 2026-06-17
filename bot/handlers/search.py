@@ -14,6 +14,13 @@ class SearchStates(StatesGroup):
     waiting_for_analog_query = State()
 
 
+@router.message(F.text == "❌ Отмена")
+async def handle_cancel_search(message: Message, state: FSMContext, user: dict):
+    await state.clear()
+    role = user.get("Роль", "user") if user else "user"
+    await message.answer("Действие отменено.", reply_markup=main_menu_keyboard(role))
+
+
 @router.message(F.text == "🔍 Найти материал")
 async def handle_find_material(message: Message, state: FSMContext):
     await state.set_state(SearchStates.waiting_for_material_name)

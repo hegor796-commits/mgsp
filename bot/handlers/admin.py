@@ -60,6 +60,13 @@ async def handle_add_user_start(callback: CallbackQuery, state: FSMContext, user
     )
 
 
+@router.message(F.text == "❌ Отмена")
+async def handle_cancel_admin(message: Message, state: FSMContext, user: dict):
+    await state.clear()
+    role = user.get("Роль", "user") if user else "user"
+    await message.answer("Действие отменено.", reply_markup=main_menu_keyboard(role))
+
+
 @router.message(AddUserStates.waiting_for_telegram_id)
 async def handle_add_user_id(message: Message, state: FSMContext):
     text = message.text.strip()
