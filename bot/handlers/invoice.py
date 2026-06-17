@@ -405,20 +405,49 @@ async def handle_zip(message: Message, state: FSMContext, bot: Bot, user: dict):
     )
 
 
-def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]:
-    """Process one file from a ZIP batch synchronously.
-    Returns (added, updated) counts. Blocking is acceptable here since
-    page limit + 150 DPI keeps each file under ~30 s."""
+def _process_zip_file(file_path: str, db, user_id: int, api_key: str) -> tuple[int, int, str]:
+    """Process one file from a ZIP batch synchronously (runs in a thread).
+    Returns (added, updated, skip_reason) — skip_reason is non-empty when
+    the file yielded nothing so callers can report diagnostics."""
     from bot.services.ocr import detect_and_parse
+    from bot.services.ai_extractor import AIExtractor
+    from openai import OpenAI
+
+    # Each thread gets its own HTTP client to avoid event-loop conflicts
+    extractor = AIExtractor(api_key)
 
     text = detect_and_parse(file_path)
     if not text or len(text.strip()) < 10:
-        return 0, 0
+        return 0, 0, "empty_text"
 
-    invoice_data = ai_extractor.extract_invoice(text)
+    invoice_data = extractor.extract_invoice(text)
     items = invoice_data.get("items", [])
+
+    # Fallback: if extract_invoice found nothing, try the price-list extractor
     if not items:
-        return 0, 0
+        materials = extractor.extract_materials_for_db(text)
+        if materials:
+            invoice_data = {
+                "invoice_number": None,
+                "invoice_date": None,
+                "supplier": None,
+                "total_amount": None,
+                "vat_amount": None,
+            }
+            items = [
+                {
+                    "name": m.get("name"),
+                    "unit": m.get("unit") or "шт",
+                    "price_no_vat": m.get("price_no_vat"),
+                    "price_with_vat": m.get("price_with_vat"),
+                    "amount": m.get("amount"),
+                    "quantity": m.get("quantity"),
+                }
+                for m in materials
+                if m.get("name")
+            ]
+    if not items:
+        return 0, 0, "no_items"
 
     supplier = invoice_data.get("supplier") or ""
     invoice_num = invoice_data.get("invoice_number") or ""
@@ -430,13 +459,13 @@ def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]:
         raw_name = (item.get("name") or "").strip()
         if not raw_name:
             continue
-        price = ai_extractor.resolve_price_no_vat(item, invoice_data) or item.get("price_with_vat")
+        price = extractor.resolve_price_no_vat(item, invoice_data) or item.get("price_with_vat")
         item["price_no_vat"] = price
         unit = item.get("unit") or "шт"
         characteristics = {k: v for k, v in item.items()
                            if k not in ("name", "unit", "quantity", "price_no_vat",
                                         "price_with_vat", "amount") and v}
-        normalized = ai_extractor.normalize_name(raw_name, characteristics)
+        normalized = extractor.normalize_name(raw_name, characteristics)
         key = normalized.lower().strip()
         if key in seen:
             continue
@@ -447,7 +476,7 @@ def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]:
             first_word = normalized.split()[0] if normalized.split() else normalized
             for candidate in db.search_materials(first_word)[:10]:
                 cand_name = candidate.get("Нормализованное наименование", "")
-                if ai_extractor.is_same_material(normalized, cand_name):
+                if extractor.is_same_material(normalized, cand_name):
                     existing = candidate
                     break
 
@@ -479,7 +508,7 @@ def _process_zip_file(file_path: str, db, user_id: int) -> tuple[int, int]:
                 )
                 updated += 1
 
-    return added, updated
+    return added, updated, ""
 
 
 async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id: str, db):
@@ -511,6 +540,8 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
         added_total = 0
         updated_total = 0
         errors = 0
+        skipped_empty = 0
+        skipped_no_items = 0
         processed = 0
 
         for member in members:
@@ -519,9 +550,15 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
                 continue
 
             try:
-                added, updated = _process_zip_file(file_path, db, user_id)
+                added, updated, skip_reason = await asyncio.to_thread(
+                    _process_zip_file, file_path, db, user_id, settings.OPENAI_API_KEY
+                )
                 added_total += added
                 updated_total += updated
+                if skip_reason == "empty_text":
+                    skipped_empty += 1
+                elif skip_reason == "no_items":
+                    skipped_no_items += 1
             except Exception:
                 errors += 1
 
@@ -532,11 +569,14 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
                     f"⏳ Обработано {processed}/{total} файлов...\n"
                     f"✅ Добавлено позиций: {added_total}\n"
                     f"🔄 Цена обновлена: {updated_total}\n"
+                    f"📭 Пустых файлов: {skipped_empty}\n"
+                    f"📄 Не счетов (нет товаров): {skipped_no_items}\n"
                     f"❌ Ошибок: {errors}"
                 )
 
         db.log_action(user_id, "Пакетная обработка ZIP",
-                      f"Файлов: {total}, добавлено: {added_total}, обновлено: {updated_total}, ошибок: {errors}")
+                      f"Файлов: {total}, добавлено: {added_total}, обновлено: {updated_total}, "
+                      f"пустых: {skipped_empty}, без товаров: {skipped_no_items}, ошибок: {errors}")
 
         await bot.send_message(
             chat_id,
@@ -544,7 +584,9 @@ async def _process_zip_background(bot: Bot, chat_id: int, user_id: int, file_id:
             f"📂 Всего файлов: {total}\n"
             f"✅ Новых позиций добавлено в базу: {added_total}\n"
             f"🔄 Цен обновлено (нашли дешевле): {updated_total}\n"
-            f"❌ Файлов с ошибками (нечитаемые/не счета): {errors}"
+            f"📭 Пустых/нечитаемых файлов: {skipped_empty}\n"
+            f"📄 Файлов без товаров (договоры, акты и т.п.): {skipped_no_items}\n"
+            f"❌ Файлов с ошибками: {errors}"
         )
 
     except zipfile.BadZipFile:
