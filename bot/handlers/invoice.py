@@ -412,8 +412,7 @@ def _process_zip_file(file_path: str, db, user_id: int, api_key: str) -> tuple[i
     from bot.services.ocr import detect_and_parse
     from bot.services.ai_extractor import AIExtractor
 
-    # gpt-4o-mini: ~500 RPM limit vs ~10 RPM for gpt-4o — essential for batch
-    extractor = AIExtractor(api_key, model="gpt-4o-mini")
+    extractor = AIExtractor(api_key, model="gpt-4o")
 
     text = detect_and_parse(file_path)
     if not text or len(text.strip()) < 10:

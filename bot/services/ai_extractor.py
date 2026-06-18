@@ -1,12 +1,6 @@
 import json
 import re
-import time
-import threading
 from openai import OpenAI
-
-# Global rate limiter: no more than 1 OpenAI call per second across all threads
-_rate_lock = threading.Lock()
-_last_call_time: float = 0.0
 
 
 SYSTEM_PROMPT = """Ты — специализированный ассистент для анализа счетов и накладных на русском языке.
@@ -22,14 +16,6 @@ class AIExtractor:
         self.model = model
 
     def _call_openai(self, prompt: str, system: str = None, temperature: float = 0) -> str:
-        global _last_call_time
-        with _rate_lock:
-            now = time.monotonic()
-            gap = now - _last_call_time
-            if gap < 1.0:
-                time.sleep(1.0 - gap)
-            _last_call_time = time.monotonic()
-
         response = self.client.chat.completions.create(
             model=self.model,
             max_tokens=4096,
