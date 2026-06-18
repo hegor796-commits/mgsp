@@ -291,7 +291,8 @@ class AIExtractor:
         first_word = words[0] if words else normalized
         candidates = db.search_materials(first_word)
 
-        # 2. Deterministic digit-group match over EVERY candidate
+        # 2. Deterministic digit-group match — a quick, reliable positive:
+        #    identical sizes/diameters/model numbers means the same item.
         target_digits = self._extract_digit_groups(normalized)
         if target_digits:
             for c in candidates:
@@ -299,8 +300,10 @@ class AIExtractor:
                 if self._extract_digit_groups(cand_name) == target_digits:
                     return c
 
-        # 3. AI semantic fallback (only for items without distinctive digits)
-        for c in candidates[:5]:
+        # 3. AI semantic check — ALWAYS run, over every same-first-word
+        #    candidate, so re-uploads are matched by meaning even when the
+        #    digits/wording differ slightly between extractions.
+        for c in candidates:
             cand_name = c.get("Нормализованное наименование", "")
             if self.is_same_material(normalized, cand_name):
                 return c
