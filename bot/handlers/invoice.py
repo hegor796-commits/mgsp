@@ -108,6 +108,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
         invoice_num_raw = invoice_data.get("invoice_number") or ""
         invoice_date_raw = invoice_data.get("invoice_date") or ""
         auto_added = 0
+        newly_added: set[str] = set()  # normalized names added in this session
         seen_names: set[str] = set()  # deduplicate within this invoice
         for item in items:
             raw_name = item.get("name", "").strip()
@@ -150,6 +151,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
                             "Пользователь": str(message.from_user.id),
                         })
                 auto_added += 1
+                newly_added.add(normalized.lower().strip())
             elif price:
                 existing_price = existing.get("Минимальная цена без НДС")
                 if existing_price is None or float(price) < float(existing_price):
@@ -160,7 +162,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
 
         # Price check (uses normalized names that are now in DB)
         await message.answer("Сверяю цены с базой данных...")
-        check_results = check_invoice(items, db, ai_extractor)
+        check_results = check_invoice(items, db, ai_extractor, newly_added=newly_added)
         savings = calculate_savings(check_results)
 
         # Build summary message
@@ -172,22 +174,29 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
         ok = savings["ok_count"]
         need_approval = savings["overpriced_count"]
         not_found = savings["not_found_count"]
+        new_items = savings["new_count"]
         total_savings = savings["total_savings"]
 
-        if need_approval == 0 and not_found == 0:
+        if need_approval == 0 and not_found == 0 and new_items == 0:
             conclusion = "Счет можно оплачивать полностью."
+        elif need_approval == 0 and not_found == 0 and new_items > 0:
+            conclusion = (
+                f"{new_items} позиций добавлены в базу впервые — "
+                "цены не с чем сравнивать, требуется ручная проверка."
+            )
         elif need_approval > 0 and not_found == 0:
             conclusion = f"Требуется согласование по {need_approval} позициям. Потенциальная экономия: {total_savings:.2f} руб."
-        elif need_approval == 0 and not_found > 0:
-            conclusion = f"{not_found} позиций не найдены в базе данных. Требуется ручная проверка."
         else:
-            conclusion = (
-                f"Требуется согласование по {need_approval} позициям. "
-                f"{not_found} позиций не найдены в базе. "
-                f"Потенциальная экономия: {total_savings:.2f} руб."
-            )
+            parts = []
+            if need_approval:
+                parts.append(f"согласование по {need_approval} позициям")
+            if not_found:
+                parts.append(f"{not_found} не найдены в базе")
+            if new_items:
+                parts.append(f"{new_items} впервые в базе (нет истории цен)")
+            conclusion = "Требуется ручная проверка: " + ", ".join(parts) + f". Потенциальная экономия: {total_savings:.2f} руб."
 
-        auto_added_line = f"🆕 Автоматически добавлено в базу: {auto_added} новых позиций\n" if auto_added else ""
+        new_items_line = f"🆕 Первое поступление (нет истории): {new_items}\n" if new_items else ""
 
         summary = (
             f"✅ Счет № {invoice_num} от {invoice_date} проверен.\n"
@@ -195,9 +204,10 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             f"📊 Всего позиций: {total}\n"
             f"✅ Можно оплачивать: {ok}\n"
             f"⚠️ Требуют согласования: {need_approval}\n"
+            f"🆕 Первое поступление: {new_items}\n"
             f"❓ Не найдены в базе: {not_found}\n"
             f"💰 Потенциальная экономия: {total_savings:.2f} руб. без НДС\n"
-            f"{auto_added_line}\n"
+            f"{new_items_line}\n"
             f"📋 Итог: {conclusion}"
         )
 

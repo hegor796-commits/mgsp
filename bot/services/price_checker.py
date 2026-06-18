@@ -1,7 +1,7 @@
 from typing import Optional
 
 
-def check_invoice(items: list, db, ai_extractor=None) -> list:
+def check_invoice(items: list, db, ai_extractor=None, newly_added: set = None) -> list:
     """
     Check each item in the invoice against the database.
     Returns list of dicts with item data + status, min_price, deviation_percent,
@@ -9,9 +9,26 @@ def check_invoice(items: list, db, ai_extractor=None) -> list:
     """
     results = []
 
+    if newly_added is None:
+        newly_added = set()
+
     for item in items:
         name = item.get("name", "")
         price_no_vat = item.get("price_no_vat")
+
+        # Items added for the first time this session have no reference price —
+        # mark them clearly so the user knows they weren't actually verified.
+        if name and name.lower().strip() in newly_added:
+            results.append({
+                **item,
+                "status": "Первое поступление",
+                "min_price": price_no_vat,
+                "deviation_percent": None,
+                "savings_per_unit": None,
+                "savings_amount": None,
+                "material_id": None,
+            })
+            continue
         quantity = item.get("quantity") or 1
 
         # Search in DB — exact match first, then substring, then AI similarity
@@ -117,6 +134,7 @@ def calculate_savings(check_results: list) -> dict:
     overpriced_count = 0
     ok_count = 0
     not_found_count = 0
+    new_count = 0
     total_items = len(check_results)
 
     for item in check_results:
@@ -129,11 +147,14 @@ def calculate_savings(check_results: list) -> dict:
             total_savings += float(savings)
         elif status == "Материал не найден в базе":
             not_found_count += 1
+        elif status == "Первое поступление":
+            new_count += 1
 
     return {
         "total_savings": round(total_savings, 2),
         "overpriced_count": overpriced_count,
         "ok_count": ok_count,
         "not_found_count": not_found_count,
+        "new_count": new_count,
         "total_items": total_items,
     }
