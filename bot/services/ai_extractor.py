@@ -267,6 +267,46 @@ class AIExtractor:
         except Exception:
             return False
 
+    def find_existing(self, normalized: str, db) -> "dict | None":
+        """Find the DB material that refers to the same physical item as
+        `normalized`, robustly across re-uploads.
+
+        normalize_name is an LLM call and is NOT perfectly reproducible — the
+        same raw name can normalize to slightly different letters each time, so
+        a plain exact-name lookup misses re-uploads and creates duplicates.
+        Digit groups (sizes/diameters/model numbers), however, are stable: OCR
+        reads digits reliably and normalization preserves them. So we treat a
+        digit-group match as authoritative and scan ALL same-first-word
+        candidates for one (not just the top few), falling back to the AI
+        semantic check only when there are no digits to key on."""
+        if not normalized:
+            return None
+
+        # 1. Exact normalized-name hit (fast path, identical wording)
+        existing = db.get_material(normalized)
+        if existing:
+            return existing
+
+        words = normalized.split()
+        first_word = words[0] if words else normalized
+        candidates = db.search_materials(first_word)
+
+        # 2. Deterministic digit-group match over EVERY candidate
+        target_digits = self._extract_digit_groups(normalized)
+        if target_digits:
+            for c in candidates:
+                cand_name = c.get("Нормализованное наименование", "")
+                if self._extract_digit_groups(cand_name) == target_digits:
+                    return c
+
+        # 3. AI semantic fallback (only for items without distinctive digits)
+        for c in candidates[:5]:
+            cand_name = c.get("Нормализованное наименование", "")
+            if self.is_same_material(normalized, cand_name):
+                return c
+
+        return None
+
     def find_analogs(self, material_name: str, characteristics: dict,
                      existing_materials: list) -> list:
         if not existing_materials:

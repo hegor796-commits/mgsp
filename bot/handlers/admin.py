@@ -404,14 +404,7 @@ async def _add_materials_from_text(message: Message, state: FSMContext, db, text
             continue
         seen.add(key)
 
-        existing = db.get_material(normalized)
-        if existing is None:
-            first_word = normalized.split()[0] if normalized.split() else normalized
-            for candidate in db.search_materials(first_word)[:5]:
-                cand_name = candidate.get("Нормализованное наименование", "")
-                if ai_extractor.is_same_material(normalized, cand_name):
-                    existing = candidate
-                    break
+        existing = ai_extractor.find_existing(normalized, db)
 
         if existing is None:
             db.add_material({

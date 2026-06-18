@@ -126,18 +126,10 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             if key in seen_names:
                 continue  # duplicate within same invoice
             seen_names.add(key)
-            # Exact match check
-            existing = db.get_material(normalized)
-            if existing is None:
-                # Fuzzy check: search by first meaningful word, then ask AI
-                first_word = normalized.split()[0] if normalized.split() else normalized
-                candidates = db.search_materials(first_word)
-                for candidate in candidates[:5]:
-                    cand_name = candidate.get("Нормализованное наименование", "")
-                    if ai_extractor.is_same_material(normalized, cand_name):
-                        existing = candidate
-                        item["name"] = cand_name  # point to existing record
-                        break
+            # Robust duplicate check (exact + digit-group + AI fallback)
+            existing = ai_extractor.find_existing(normalized, db)
+            if existing is not None:
+                item["name"] = existing.get("Нормализованное наименование", normalized)
 
             if existing is None:
                 db.add_material({
@@ -336,7 +328,7 @@ async def handle_add_items_to_db(callback: CallbackQuery, state: FSMContext, use
                                         "price_with_vat", "amount") and v}
         normalized = ai_extractor.normalize_name(raw_name, characteristics)
 
-        existing = db.get_material(normalized)
+        existing = ai_extractor.find_existing(normalized, db)
 
         if existing is None:
             db.add_material({
@@ -469,14 +461,7 @@ def _process_zip_file(file_path: str, db, user_id: int, api_key: str) -> tuple[i
             continue
         seen.add(key)
 
-        existing = db.get_material(normalized)
-        if existing is None:
-            first_word = normalized.split()[0] if normalized.split() else normalized
-            for candidate in db.search_materials(first_word)[:10]:
-                cand_name = candidate.get("Нормализованное наименование", "")
-                if extractor.is_same_material(normalized, cand_name):
-                    existing = candidate
-                    break
+        existing = extractor.find_existing(normalized, db)
 
         if existing is None:
             db.add_material({
