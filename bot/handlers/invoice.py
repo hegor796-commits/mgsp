@@ -198,6 +198,18 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
 
         new_items_line = f"🆕 Первое поступление (нет истории): {new_items}\n" if new_items else ""
 
+        cheaper_lines = []
+        for r in check_results:
+            if r.get("status") == "Требуется согласование" and r.get("min_price") is not None:
+                item_name = r.get("name", "")
+                mp = r.get("min_price")
+                ms = r.get("min_supplier") or "неизвестен"
+                cheaper_lines.append(f"• {item_name} — {mp:.2f} руб. у {ms}")
+
+        cheaper_section = ""
+        if cheaper_lines:
+            cheaper_section = "\n\n💡 Где найти дешевле:\n" + "\n".join(cheaper_lines)
+
         summary = (
             f"✅ Счет № {invoice_num} от {invoice_date} проверен.\n"
             f"Поставщик: {supplier}\n\n"
@@ -209,6 +221,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot, user: dict)
             f"💰 Потенциальная экономия: {total_savings:.2f} руб. без НДС\n"
             f"{new_items_line}\n"
             f"📋 Итог: {conclusion}"
+            f"{cheaper_section}"
         )
 
         # Save check to DB

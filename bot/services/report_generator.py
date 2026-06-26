@@ -16,6 +16,7 @@ STATUS_COLORS = {
     "Можно оплачивать": "C6EFCE",
     "Требуется согласование": "FFEB9C",
     "Материал не найден в базе": "FFC7CE",
+    "Первое поступление": "BDD7EE",
 }
 
 
@@ -59,7 +60,8 @@ def generate_excel_report(invoice_data: dict, check_results: list, savings: dict
     # === Все позиции ===
     headers = ["Наименование", "Артикул", "Ед. изм.", "Кол-во",
                "Цена без НДС", "Цена с НДС", "Сумма", "Мин. цена в базе",
-               "Отклонение %", "Экономия/ед.", "Экономия итого", "Статус"]
+               "Отклонение %", "Экономия/ед.", "Экономия итого", "Статус",
+               "Поставщик мин. цены"]
     ws_all = wb.create_sheet("Все позиции")
     ws_all.append(headers)
     _apply_header_style(ws_all)
@@ -77,6 +79,7 @@ def generate_excel_report(invoice_data: dict, check_results: list, savings: dict
             item.get("savings_per_unit", ""),
             item.get("savings_amount", ""),
             item.get("status", ""),
+            item.get("min_supplier", ""),
         ]
         ws_all.append(row)
         status = item.get("status", "")
@@ -97,7 +100,7 @@ def generate_excel_report(invoice_data: dict, check_results: list, savings: dict
                 item.get("price_with_vat", ""), item.get("amount", ""),
                 item.get("min_price", ""), item.get("deviation_percent", ""),
                 item.get("savings_per_unit", ""), item.get("savings_amount", ""),
-                item.get("status", ""),
+                item.get("status", ""), item.get("min_supplier", ""),
             ])
             for cell in ws_over[ws_over.max_row]:
                 cell.fill = _status_fill("Требуется согласование")
@@ -132,7 +135,8 @@ def generate_excel_report(invoice_data: dict, check_results: list, savings: dict
         name = item.get("name", "")
         if name not in seen and item.get("min_price") is not None:
             seen.add(name)
-            ws_min.append([name, item.get("min_price", ""), ""])
+            supplier = item.get("min_supplier")
+            ws_min.append([name, item.get("min_price", ""), str(supplier or "—")])
     for col in ws_min.columns:
         ws_min.column_dimensions[col[0].column_letter].width = 30
 

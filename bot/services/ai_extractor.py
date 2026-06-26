@@ -15,9 +15,10 @@ class AIExtractor:
         self.client = OpenAI(api_key=api_key)
         self.model = model
 
-    def _call_openai(self, prompt: str, system: str = None, temperature: float = 0) -> str:
+    def _call_openai(self, prompt: str, system: str = None, temperature: float = 0, model: str = None) -> str:
+        use_model = model or self.model
         response = self.client.chat.completions.create(
-            model=self.model,
+            model=use_model,
             max_tokens=4096,
             temperature=temperature,
             messages=[
@@ -90,7 +91,7 @@ class AIExtractor:
 }}
 """
         try:
-            response = self._call_openai(prompt)
+            response = self._call_openai(prompt, model="gpt-4o")
             return self._parse_json(response)
         except json.JSONDecodeError:
             return self._empty_invoice()
@@ -167,7 +168,7 @@ class AIExtractor:
 Цену указывай null ТОЛЬКО если её действительно нигде нет в тексте рядом с этой позицией.
 """
         try:
-            response = self._call_openai(prompt)
+            response = self._call_openai(prompt, model="gpt-4o")
             data = self._parse_json(response)
             materials = data.get("materials", [])
             for mat in materials:
@@ -211,7 +212,7 @@ class AIExtractor:
 "Труба полипропиленовая d=32мм PN20" -> "труба полипропиленовая диаметр 32 мм PN20"
 """
         try:
-            response = self._call_openai(prompt)
+            response = self._call_openai(prompt, model="gpt-4o-mini")
             data = self._parse_json(response)
             return data.get("normalized_name", name).strip().lower()
         except Exception:
@@ -261,7 +262,7 @@ class AIExtractor:
 {{"same": true/false, "reason": "краткое пояснение"}}
 """
         try:
-            response = self._call_openai(prompt)
+            response = self._call_openai(prompt, model="gpt-4o-mini")
             data = self._parse_json(response)
             return bool(data.get("same", False))
         except Exception:
@@ -344,7 +345,7 @@ class AIExtractor:
 Включи только реальные аналоги с similarity > 0.5. Если аналогов нет, верни пустой список.
 """
         try:
-            response = self._call_openai(prompt)
+            response = self._call_openai(prompt, model="gpt-4o-mini")
             data = self._parse_json(response)
             return data.get("analogs", [])
         except Exception:

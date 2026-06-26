@@ -27,6 +27,8 @@ def check_invoice(items: list, db, ai_extractor=None, newly_added: set = None) -
                 "savings_per_unit": None,
                 "savings_amount": None,
                 "material_id": None,
+                "min_supplier": "",
+                "min_material_name": "",
             })
             continue
         quantity = item.get("quantity") or 1
@@ -115,7 +117,7 @@ def check_invoice(items: list, db, ai_extractor=None, newly_added: set = None) -
                 savings_per_unit = round(price_no_vat_f - min_price, 2)
                 savings_amount = round(savings_per_unit * float(quantity), 2)
 
-        results.append({
+        result_dict = {
             **item,
             "status": status,
             "min_price": min_price,
@@ -123,7 +125,11 @@ def check_invoice(items: list, db, ai_extractor=None, newly_added: set = None) -
             "savings_per_unit": savings_per_unit,
             "savings_amount": savings_amount,
             "material_id": material_id,
-        })
+        }
+        if status == "Требуется согласование":
+            result_dict["min_supplier"] = str(material.get("Поставщик минимальной цены") or "")
+            result_dict["min_material_name"] = str(material.get("Нормализованное наименование") or "")
+        results.append(result_dict)
 
     return results
 
